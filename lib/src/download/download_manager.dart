@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 
 typedef DownloadProgressCallback = void Function(DownloadProgress progress);
+typedef DownloadSourceOrderer = List<Uri> Function(List<Uri> sources);
 typedef DownloadSourceFailureCallback =
     void Function(DownloadSourceFailure failure);
 
@@ -86,14 +87,17 @@ final class DownloadCancellationToken {
 final class DownloadManager {
   DownloadManager({
     HttpClient? httpClient,
+    DownloadSourceOrderer? sourceOrderer,
     this.timeout = const Duration(seconds: 30),
   }) : assert(timeout > Duration.zero),
        _httpClient = httpClient ?? HttpClient(),
+       _sourceOrderer = sourceOrderer,
        _ownsHttpClient = httpClient == null {
     _httpClient.autoUncompress = false;
   }
 
   final HttpClient _httpClient;
+  final DownloadSourceOrderer? _sourceOrderer;
   final bool _ownsHttpClient;
   final Duration timeout;
 
@@ -109,6 +113,12 @@ final class DownloadManager {
   }) async {
     if (sources.isEmpty) {
       throw ArgumentError.value(sources, 'sources', 'Must not be empty');
+    }
+    final orderedSources = List<Uri>.unmodifiable(
+      _sourceOrderer?.call(List<Uri>.unmodifiable(sources)) ?? sources,
+    );
+    if (orderedSources.isEmpty) {
+      throw StateError('The download source policy removed every source');
     }
     _validateFileName(fileName);
     final normalizedSha256 = _normalizeSha256(expectedSha256);
@@ -131,9 +141,9 @@ final class DownloadManager {
     Object? lastError;
     StackTrace? lastStackTrace;
     final failures = <DownloadSourceFailure>[];
-    for (var index = 0; index < sources.length; index++) {
+    for (var index = 0; index < orderedSources.length; index++) {
       cancellationToken?.throwIfCancelled();
-      final source = sources[index];
+      final source = orderedSources[index];
       await _preparePartialForSource(
         partial: partial,
         metadata: partialSource,
@@ -203,7 +213,7 @@ final class DownloadManager {
       }
 
       failures.add(failure);
-      if (index + 1 < sources.length) {
+      if (index + 1 < orderedSources.length) {
         onSourceFailure?.call(failure);
       }
     }

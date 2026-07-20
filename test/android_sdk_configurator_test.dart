@@ -209,10 +209,41 @@ void main() {
       );
       expect(
         progress.map((item) => item.message),
-        contains('官网连接失败，正在切换 Android 国内镜像'),
+        contains('当前 Android 仓库不可用，正在切换备用源'),
       );
     },
   );
+
+  test('applies the configured Android repository source policy', () async {
+    final probed = <Uri>[];
+    final processes = _RecordingProcessStarter([
+      _CompletedProcess(),
+      _CompletedProcess(),
+    ]);
+    final configurator = AndroidSdkConfigurator(
+      sdkRoot: '/managed/android-sdk',
+      jdkRoot: '/managed/jdk',
+      packages: const ['platform-tools'],
+      repositoryMirrorUrls: [
+        Uri.parse('https://googledownloads.cn/android/repository/'),
+      ],
+      repositorySourceOrderer: (sources) => sources.reversed.toList(),
+      repositoryProbe: (url) async {
+        probed.add(url);
+        return true;
+      },
+      processStarter: processes,
+      isWindows: false,
+    );
+
+    await configurator.configure(licensesAccepted: true);
+
+    expect(probed.single.host, 'googledownloads.cn');
+    expect(
+      processes.requests.first.environment['SDK_TEST_BASE_URL'],
+      'https://googledownloads.cn/android/repository/',
+    );
+  });
 
   test('does not retry a non-network sdkmanager failure', () async {
     final processes = _RecordingProcessStarter([

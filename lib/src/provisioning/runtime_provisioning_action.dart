@@ -5,6 +5,7 @@ import '../install/artifact_installer.dart';
 import '../runtime_manifest/runtime_manifest.dart';
 import '../setup/setup_task.dart';
 import '../storage/runtime_layout.dart';
+import 'runtime_cache_file_name.dart';
 
 typedef RuntimePostInstall =
     Future<void> Function(
@@ -49,7 +50,7 @@ final class RuntimeProvisioningAction implements CancellableSetupTaskAction {
       final download = await _downloads.downloadFromSources(
         sources: artifact.downloadUrls,
         destinationDirectory: _layout.cache,
-        fileName: _cacheFileName(),
+        fileName: runtimeArtifactCacheFileName(component, artifact),
         expectedSha256: artifact.sha256,
         cancellationToken: token,
         onProgress: (progress) {
@@ -91,21 +92,4 @@ final class RuntimeProvisioningAction implements CancellableSetupTaskAction {
       if (identical(_cancellationToken, token)) _cancellationToken = null;
     }
   }
-
-  String _cacheFileName() {
-    final sourceName = artifact.officialUrl.pathSegments
-        .where((segment) => segment.isNotEmpty)
-        .lastOrNull;
-    final extension = sourceName == null ? 'artifact' : _safeName(sourceName);
-    return _safeName(
-      '${component.id}-${component.version}-'
-      '${artifact.platform.jsonValue}-${artifact.architecture.jsonValue}-$extension',
-    );
-  }
-}
-
-String _safeName(String value) {
-  final safe = value.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
-  if (safe.isEmpty || safe == '.' || safe == '..') return 'artifact';
-  return safe;
 }

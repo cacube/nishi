@@ -15,8 +15,8 @@ The application installs, detects, configures, updates, and repairs development 
 - Strict runtime manifest parsing and validation for platform artifacts,
   dependencies, services, HTTPS sources, and SHA-256 digests.
 - Resumable downloads with verified cache reuse, cancellation, timeouts,
-  progress reporting, integrity checks, official-first automatic China mirror
-  fallback, and safe target activation.
+  progress reporting, integrity checks, signed-manifest-constrained official
+  and exact-byte China mirror policies, and safe target activation.
 - Version compatibility checks plus protocol-level MySQL and Redis probes.
 - User-scoped cache, runtime, data, and log directory layout.
 - Dependency-aware setup orchestration with isolated failures and focused retry.
@@ -29,6 +29,14 @@ The application installs, detects, configures, updates, and repairs development 
 - Explicit user-confirmation/elevation plans for DMG/PKG/MSI/EXE installers.
 - A one-click setup UI with download/install progress, cancellation, retry,
   Android license acceptance, and system-installer confirmation.
+- A signed-manifest update center with current-to-target version comparison,
+  per-component or all-component updates, safe no-downgrade behavior, and
+  optional verified package pre-download without automatic installation.
+- Persistent settings for startup checks, installed-component pre-download,
+  automatic/official-only/China-mirror-first source selection, cache and old
+  runtime cleanup, environment repair, directory access, and diagnostics.
+- A shared runtime-operation lock that prevents installation, pre-download,
+  cache cleanup, old-version cleanup, and environment repair from racing.
 - Managed user-environment persistence plus reversible macOS LaunchAgent and
   Windows scheduled-task plans, including MySQL initialization and autostart.
 - macOS release build with the process access required for tool discovery.
@@ -42,6 +50,11 @@ GitHub Release assets. Clean Windows 2025 and macOS 15 runners have completed
 the managed Flutter/Android/Web/desktop and Gin-Vue-Admin server installation
 smokes. The recorded workflow runs and the required release procedure are in
 [docs/releasing.md](docs/releasing.md).
+
+Nishi application updates currently open the project's GitHub Releases page;
+the application does not replace its own desktop bundle in place. Automatic
+component downloads only populate the verified cache for already installed
+components. Installation remains an explicit user action.
 
 Redis is optional for the targeted Gin-Vue-Admin v3.0.0 release because its
 default configuration sets `use-redis` to `false`. Nishi does not currently

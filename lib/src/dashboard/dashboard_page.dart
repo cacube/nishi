@@ -5,9 +5,13 @@ import 'package:flutter/material.dart';
 import '../environment/environment_component.dart';
 import '../environment/environment_controller.dart';
 import '../install/artifact_installer.dart';
+import '../settings/settings.dart';
 import '../setup/setup_task.dart';
 import '../setup_ui/setup_composition.dart';
 import '../setup_ui/setup_ui_controller.dart';
+import '../update/update.dart';
+
+enum _DashboardSection { environment, updates, settings }
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key, this.composition});
@@ -21,6 +25,7 @@ class DashboardPage extends StatefulWidget {
 class _DashboardPageState extends State<DashboardPage> {
   late final SetupComposition _composition;
   late final bool _ownsComposition;
+  _DashboardSection _section = _DashboardSection.environment;
 
   @override
   void initState() {
@@ -29,13 +34,36 @@ class _DashboardPageState extends State<DashboardPage> {
     _composition = widget.composition ?? SetupComposition.forCurrentUser();
     _composition.environment.addListener(_onChanged);
     _composition.setup.addListener(_onChanged);
-    _composition.environment.scan();
+    _composition.settings.addListener(_onChanged);
+    _composition.updates.addListener(_onChanged);
+    _composition.operations.addListener(_onChanged);
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    await _composition.settings.load();
+    await _composition.environment.scan();
+    if (_composition.settings.settings.autoCheckUpdates) {
+      await _checkUpdates();
+    }
+  }
+
+  Future<void> _checkUpdates() async {
+    await _composition.updates.check();
+    if (_composition.settings.settings.autoDownloadUpdates) {
+      await _composition.updates.downloadAvailableUpdates(
+        includeNotInstalled: false,
+      );
+    }
   }
 
   @override
   void dispose() {
     _composition.environment.removeListener(_onChanged);
     _composition.setup.removeListener(_onChanged);
+    _composition.settings.removeListener(_onChanged);
+    _composition.updates.removeListener(_onChanged);
+    _composition.operations.removeListener(_onChanged);
     if (_ownsComposition) _composition.dispose();
     super.dispose();
   }
@@ -44,27 +72,79 @@ class _DashboardPageState extends State<DashboardPage> {
     if (mounted) setState(() {});
   }
 
+  void _selectSection(_DashboardSection section) {
+    if (_section == section) return;
+    setState(() => _section = section);
+    if (section == _DashboardSection.updates &&
+        _composition.updates.state.entries.isEmpty &&
+        !_composition.updates.state.checking) {
+      _checkUpdates();
+    }
+  }
+
+  Future<void> _refresh() => switch (_section) {
+    _DashboardSection.environment => _composition.environment.scan(),
+    _DashboardSection.updates => _checkUpdates(),
+    _DashboardSection.settings => _composition.settings.load(),
+  };
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
         child: Row(
           children: [
-            _NavigationRail(scanning: _composition.environment.scanning),
+            _NavigationRail(
+              scanning:
+                  _composition.environment.scanning ||
+                  _composition.updates.state.checking ||
+                  _composition.settings.loading ||
+                  _composition.operations.busy,
+              selected: _section,
+              onSelected: _selectSection,
+            ),
             const VerticalDivider(width: 1),
             Expanded(
               child: Column(
                 children: [
                   _TopBar(
-                    scanning: _composition.environment.scanning,
-                    onRefresh: _composition.environment.scan,
+                    title: switch (_section) {
+                      _DashboardSection.environment => '开发环境',
+                      _DashboardSection.updates => '更新中心',
+                      _DashboardSection.settings => '设置',
+                    },
+                    scanning: switch (_section) {
+                      _DashboardSection.environment =>
+                        _composition.environment.scanning,
+                      _DashboardSection.updates =>
+                        _composition.updates.state.checking,
+                      _DashboardSection.settings =>
+                        _composition.settings.loading,
+                    },
+                    onRefresh: _refresh,
                   ),
                   const Divider(),
                   Expanded(
-                    child: _DashboardBody(
-                      controller: _composition.environment,
-                      setup: _composition.setup,
-                    ),
+                    child: switch (_section) {
+                      _DashboardSection.environment => _DashboardBody(
+                        controller: _composition.environment,
+                        setup: _composition.setup,
+                        onOpenUpdates: () =>
+                            _selectSection(_DashboardSection.updates),
+                        runtimeBusy: _composition.operations.busy,
+                      ),
+                      _DashboardSection.updates => _UpdateBody(
+                        controller: _composition.updates,
+                        setup: _composition.setup,
+                        onCheck: _checkUpdates,
+                        runtimeBusy: _composition.operations.busy,
+                      ),
+                      _DashboardSection.settings => _SettingsBody(
+                        controller: _composition.settings,
+                        environment: _composition.environment,
+                        runtimeBusy: _composition.operations.busy,
+                      ),
+                    },
                   ),
                 ],
               ),
@@ -77,9 +157,15 @@ class _DashboardPageState extends State<DashboardPage> {
 }
 
 class _NavigationRail extends StatelessWidget {
-  const _NavigationRail({required this.scanning});
+  const _NavigationRail({
+    required this.scanning,
+    required this.selected,
+    required this.onSelected,
+  });
 
   final bool scanning;
+  final _DashboardSection selected;
+  final ValueChanged<_DashboardSection> onSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -98,12 +184,18 @@ class _NavigationRail extends StatelessWidget {
             child: const Icon(Icons.terminal, color: Colors.white),
           ),
           const SizedBox(height: 28),
-          const _NavItem(
+          _NavItem(
             icon: Icons.dashboard_outlined,
             label: '环境',
-            selected: true,
+            selected: selected == _DashboardSection.environment,
+            onTap: () => onSelected(_DashboardSection.environment),
           ),
-          const _NavItem(icon: Icons.system_update_alt, label: '更新'),
+          _NavItem(
+            icon: Icons.system_update_alt,
+            label: '更新',
+            selected: selected == _DashboardSection.updates,
+            onTap: () => onSelected(_DashboardSection.updates),
+          ),
           const Spacer(),
           if (scanning)
             const SizedBox(
@@ -112,7 +204,12 @@ class _NavigationRail extends StatelessWidget {
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
           const SizedBox(height: 20),
-          const _NavItem(icon: Icons.settings_outlined, label: '设置'),
+          _NavItem(
+            icon: Icons.settings_outlined,
+            label: '设置',
+            selected: selected == _DashboardSection.settings,
+            onTap: () => onSelected(_DashboardSection.settings),
+          ),
           const SizedBox(height: 14),
         ],
       ),
@@ -125,34 +222,48 @@ class _NavItem extends StatelessWidget {
     required this.icon,
     required this.label,
     this.selected = false,
+    required this.onTap,
   });
 
   final IconData icon;
   final String label;
   final bool selected;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final color = selected
         ? Theme.of(context).colorScheme.primary
         : const Color(0xFF687069);
-    return SizedBox(
-      height: 58,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 21, color: color),
-          const SizedBox(height: 4),
-          Text(label, style: TextStyle(fontSize: 11, color: color)),
-        ],
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: SizedBox(
+          width: 84,
+          height: 58,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 21, color: color),
+              const SizedBox(height: 4),
+              Text(label, style: TextStyle(fontSize: 11, color: color)),
+            ],
+          ),
+        ),
       ),
     );
   }
 }
 
 class _TopBar extends StatelessWidget {
-  const _TopBar({required this.scanning, required this.onRefresh});
+  const _TopBar({
+    required this.title,
+    required this.scanning,
+    required this.onRefresh,
+  });
 
+  final String title;
   final bool scanning;
   final VoidCallback onRefresh;
 
@@ -164,9 +275,9 @@ class _TopBar extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 28),
         child: Row(
           children: [
-            const Text(
-              '开发环境',
-              style: TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
             ),
             const Spacer(),
             IconButton(
@@ -181,11 +292,585 @@ class _TopBar extends StatelessWidget {
   }
 }
 
+class _UpdateBody extends StatelessWidget {
+  const _UpdateBody({
+    required this.controller,
+    required this.setup,
+    required this.onCheck,
+    required this.runtimeBusy,
+  });
+
+  final UpdateController controller;
+  final SetupUiController setup;
+  final Future<void> Function() onCheck;
+  final bool runtimeBusy;
+
+  bool get _setupBusy =>
+      runtimeBusy ||
+      controller.state.downloading ||
+      switch (setup.state.phase) {
+        SetupUiPhase.preparing ||
+        SetupUiPhase.running ||
+        SetupUiPhase.cancelling ||
+        SetupUiPhase.awaitingPreflight ||
+        SetupUiPhase.awaitingUser => true,
+        _ => false,
+      };
+
+  Future<void> _update(Set<String> componentIds) async {
+    await setup.startSelected(componentIds);
+    if (setup.state.phase == SetupUiPhase.completed) {
+      await controller.check();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = controller.state;
+    final available = state.availableUpdates;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(28, 24, 28, 32),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1080),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(22),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  border: Border.all(color: const Color(0xFFE1E4DF)),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: available.isEmpty
+                            ? const Color(0xFF19734B)
+                            : const Color(0xFF176B5B),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        available.isEmpty ? Icons.check : Icons.system_update,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '组件更新',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            state.downloading
+                                ? '正在下载更新包'
+                                : state.checking
+                                ? '正在检查签名清单'
+                                : available.isEmpty
+                                ? '所有托管组件均为目标版本'
+                                : '${available.length} 个组件可安装或更新',
+                            style: const TextStyle(color: Color(0xFF687069)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    OutlinedButton.icon(
+                      onPressed: state.checking ? null : onCheck,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('重新检查'),
+                    ),
+                    const SizedBox(width: 10),
+                    OutlinedButton.icon(
+                      onPressed: available.isEmpty || _setupBusy
+                          ? null
+                          : controller.downloadAvailableUpdates,
+                      icon: const Icon(Icons.cloud_download_outlined),
+                      label: const Text('下载更新包'),
+                    ),
+                    const SizedBox(width: 10),
+                    FilledButton.icon(
+                      onPressed: available.isEmpty || _setupBusy
+                          ? null
+                          : () => _update(
+                              available
+                                  .map((entry) => entry.componentId)
+                                  .toSet(),
+                            ),
+                      icon: const Icon(Icons.download),
+                      label: const Text('更新全部'),
+                    ),
+                  ],
+                ),
+              ),
+              if (state.errorMessage case final error?) ...[
+                const SizedBox(height: 12),
+                Text(error, style: const TextStyle(color: Color(0xFFB43B32))),
+              ],
+              if (state.downloadErrorMessage case final error?) ...[
+                const SizedBox(height: 12),
+                Text(error, style: const TextStyle(color: Color(0xFFB43B32))),
+              ],
+              if (state.downloadCancelled) ...[
+                const SizedBox(height: 12),
+                const Text(
+                  '更新包下载已取消，可随时重新下载',
+                  style: TextStyle(color: Color(0xFF687069)),
+                ),
+              ],
+              if (state.downloading) ...[
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: LinearProgressIndicator(
+                        value: state.downloadProgress.clamp(0, 1),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    IconButton(
+                      tooltip: '取消下载',
+                      onPressed: controller.cancelDownload,
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+              ],
+              if (setup.state.phase != SetupUiPhase.idle) ...[
+                const SizedBox(height: 16),
+                _SetupProgressPanel(setup: setup),
+              ],
+              const SizedBox(height: 20),
+              if (state.checking && state.entries.isEmpty)
+                const SizedBox(
+                  height: 220,
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else
+                Card(
+                  child: Column(
+                    children: [
+                      for (
+                        var index = 0;
+                        index < state.entries.length;
+                        index++
+                      ) ...[
+                        _UpdateRow(
+                          entry: state.entries[index],
+                          busy: _setupBusy,
+                          onUpdate: () =>
+                              _update({state.entries[index].componentId}),
+                        ),
+                        if (index != state.entries.length - 1)
+                          const Divider(indent: 18, endIndent: 18),
+                      ],
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 20),
+              _SettingsSection(
+                title: 'Nishi 软件',
+                icon: Icons.apps,
+                children: [
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('私用构建'),
+                    subtitle: const Text('软件安装包更新通过 GitHub Releases 获取'),
+                    trailing: OutlinedButton.icon(
+                      onPressed: () => _openExternal(
+                        context,
+                        'https://github.com/cacube/nishi/releases/latest',
+                      ),
+                      icon: const Icon(Icons.open_in_new),
+                      label: const Text('查看新版'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _UpdateRow extends StatelessWidget {
+  const _UpdateRow({
+    required this.entry,
+    required this.busy,
+    required this.onUpdate,
+  });
+
+  final RuntimeUpdateEntry entry;
+  final bool busy;
+  final VoidCallback onUpdate;
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, color) = switch (entry.status) {
+      RuntimeUpdateStatus.current => ('最新', const Color(0xFF19734B)),
+      RuntimeUpdateStatus.updateAvailable => ('可更新', const Color(0xFF9A5B00)),
+      RuntimeUpdateStatus.notInstalled => ('未安装', const Color(0xFF687069)),
+      RuntimeUpdateStatus.newerThanTarget => ('版本较新', const Color(0xFF176B5B)),
+    };
+    return SizedBox(
+      height: 72,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 18),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 210,
+              child: Text(
+                entry.displayName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+            Expanded(
+              child: Text(
+                '${entry.currentVersion ?? '未安装'}  →  ${entry.targetVersion}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Color(0xFF687069)),
+              ),
+            ),
+            Container(
+              width: 68,
+              alignment: Alignment.center,
+              child: Text(label, style: TextStyle(fontSize: 12, color: color)),
+            ),
+            const SizedBox(width: 12),
+            SizedBox(
+              width: 88,
+              child:
+                  entry.status == RuntimeUpdateStatus.current ||
+                      entry.status == RuntimeUpdateStatus.newerThanTarget
+                  ? const SizedBox.shrink()
+                  : OutlinedButton(
+                      onPressed: busy ? null : onUpdate,
+                      child: Text(
+                        entry.status == RuntimeUpdateStatus.notInstalled
+                            ? '安装'
+                            : '更新',
+                      ),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsBody extends StatelessWidget {
+  const _SettingsBody({
+    required this.controller,
+    required this.environment,
+    required this.runtimeBusy,
+  });
+
+  final SettingsController controller;
+  final EnvironmentController environment;
+  final bool runtimeBusy;
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = controller.settings;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(28, 24, 28, 32),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 900),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (controller.errorMessage case final error?) ...[
+                Text(error, style: const TextStyle(color: Color(0xFFB43B32))),
+                const SizedBox(height: 12),
+              ],
+              _SettingsSection(
+                title: '更新设置',
+                icon: Icons.update,
+                children: [
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('启动时检查组件更新'),
+                    value: settings.autoCheckUpdates,
+                    onChanged: controller.saving
+                        ? null
+                        : controller.setAutoCheckUpdates,
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('自动下载更新包'),
+                    subtitle: const Text('仅预下载已安装组件的新版本，不会自动安装'),
+                    value: settings.autoDownloadUpdates,
+                    onChanged: controller.saving
+                        ? null
+                        : controller.setAutoDownloadUpdates,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              _SettingsSection(
+                title: '下载源',
+                icon: Icons.cloud_download_outlined,
+                children: [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: SegmentedButton<DownloadSourcePreference>(
+                      segments: const [
+                        ButtonSegment(
+                          value: DownloadSourcePreference.automatic,
+                          icon: Icon(Icons.auto_awesome),
+                          label: Text('自动'),
+                        ),
+                        ButtonSegment(
+                          value: DownloadSourcePreference.officialOnly,
+                          icon: Icon(Icons.public),
+                          label: Text('仅官网'),
+                        ),
+                        ButtonSegment(
+                          value: DownloadSourcePreference.mirrorFirst,
+                          icon: Icon(Icons.speed),
+                          label: Text('国内优先'),
+                        ),
+                      ],
+                      selected: {settings.downloadSourcePreference},
+                      onSelectionChanged: controller.saving
+                          ? null
+                          : (selected) => controller
+                                .setDownloadSourcePreference(selected.single),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              _SettingsSection(
+                title: '缓存与存储',
+                icon: Icons.folder_outlined,
+                children: [
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('下载缓存'),
+                    subtitle: Text(_formatBytes(controller.cacheBytes)),
+                    trailing: Wrap(
+                      spacing: 8,
+                      children: [
+                        IconButton(
+                          tooltip: '打开缓存目录',
+                          onPressed: controller.cachePath == null
+                              ? null
+                              : () => _openDirectory(
+                                  context,
+                                  controller.cachePath!,
+                                ),
+                          icon: const Icon(Icons.folder_open),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: controller.storageBusy || runtimeBusy
+                              ? null
+                              : controller.clearCache,
+                          icon: const Icon(Icons.delete_outline),
+                          label: const Text('清理缓存'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('托管运行时'),
+                    trailing: Wrap(
+                      spacing: 8,
+                      children: [
+                        IconButton(
+                          tooltip: '打开运行时目录',
+                          onPressed: controller.runtimesPath == null
+                              ? null
+                              : () => _openDirectory(
+                                  context,
+                                  controller.runtimesPath!,
+                                ),
+                          icon: const Icon(Icons.folder_open),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: controller.storageBusy || runtimeBusy
+                              ? null
+                              : () async {
+                                  final removed = await controller
+                                      .removeInactiveRuntimeVersions();
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('已清理 $removed 个旧版本'),
+                                      ),
+                                    );
+                                  }
+                                },
+                          icon: const Icon(Icons.cleaning_services_outlined),
+                          label: const Text('清理旧版本'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              _SettingsSection(
+                title: '环境与诊断',
+                icon: Icons.build_outlined,
+                children: [
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      FilledButton.icon(
+                        onPressed:
+                            controller.repairingEnvironment || runtimeBusy
+                            ? null
+                            : controller.repairEnvironment,
+                        icon: const Icon(Icons.handyman_outlined),
+                        label: Text(
+                          controller.repairingEnvironment ? '正在修复' : '修复环境变量',
+                        ),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: environment.scanning
+                            ? null
+                            : environment.scan,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('重新检测'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: controller.logsPath == null
+                            ? null
+                            : () =>
+                                  _openDirectory(context, controller.logsPath!),
+                        icon: const Icon(Icons.article_outlined),
+                        label: const Text('打开日志'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: controller.logsPath == null
+                            ? null
+                            : () async {
+                                final report = await controller
+                                    .exportDiagnostics();
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('诊断报告已生成：${report.path}'),
+                                    ),
+                                  );
+                                }
+                              },
+                        icon: const Icon(Icons.ios_share_outlined),
+                        label: const Text('导出诊断'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              _SettingsSection(
+                title: '安全',
+                icon: Icons.verified_user_outlined,
+                children: const [
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text('运行时清单签名'),
+                    subtitle: Text('Ed25519 · nishi-release-2026-01'),
+                    trailing: Icon(Icons.verified, color: Color(0xFF19734B)),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsSection extends StatelessWidget {
+  const _SettingsSection({
+    required this.title,
+    required this.icon,
+    required this.children,
+  });
+
+  final String title;
+  final IconData icon;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFE1E4DF)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 19, color: const Color(0xFF176B5B)),
+              const SizedBox(width: 9),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ...children,
+        ],
+      ),
+    );
+  }
+}
+
+String _formatBytes(int bytes) {
+  if (bytes < 1024) return '$bytes B';
+  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+  if (bytes < 1024 * 1024 * 1024) {
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+  return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+}
+
 class _DashboardBody extends StatelessWidget {
-  const _DashboardBody({required this.controller, required this.setup});
+  const _DashboardBody({
+    required this.controller,
+    required this.setup,
+    required this.onOpenUpdates,
+    required this.runtimeBusy,
+  });
 
   final EnvironmentController controller;
   final SetupUiController setup;
+  final VoidCallback onOpenUpdates;
+  final bool runtimeBusy;
 
   @override
   Widget build(BuildContext context) {
@@ -204,7 +889,12 @@ class _DashboardBody extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _ReadinessBand(controller: controller, setup: setup),
+                  _ReadinessBand(
+                    controller: controller,
+                    setup: setup,
+                    onOpenUpdates: onOpenUpdates,
+                    runtimeBusy: runtimeBusy,
+                  ),
                   if (setup.state.phase != SetupUiPhase.idle) ...[
                     const SizedBox(height: 16),
                     _SetupProgressPanel(setup: setup),
@@ -251,10 +941,17 @@ class _DashboardBody extends StatelessWidget {
 }
 
 class _ReadinessBand extends StatelessWidget {
-  const _ReadinessBand({required this.controller, required this.setup});
+  const _ReadinessBand({
+    required this.controller,
+    required this.setup,
+    required this.onOpenUpdates,
+    required this.runtimeBusy,
+  });
 
   final EnvironmentController controller;
   final SetupUiController setup;
+  final VoidCallback onOpenUpdates;
+  final bool runtimeBusy;
 
   @override
   Widget build(BuildContext context) {
@@ -319,7 +1016,12 @@ class _ReadinessBand extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 20),
-          _SetupCommand(setup: setup, ready: ready),
+          _SetupCommand(
+            setup: setup,
+            ready: ready,
+            onOpenUpdates: onOpenUpdates,
+            runtimeBusy: runtimeBusy,
+          ),
         ],
       ),
     );
@@ -327,10 +1029,17 @@ class _ReadinessBand extends StatelessWidget {
 }
 
 class _SetupCommand extends StatelessWidget {
-  const _SetupCommand({required this.setup, required this.ready});
+  const _SetupCommand({
+    required this.setup,
+    required this.ready,
+    required this.onOpenUpdates,
+    required this.runtimeBusy,
+  });
 
   final SetupUiController setup;
   final bool ready;
+  final VoidCallback onOpenUpdates;
+  final bool runtimeBusy;
 
   @override
   Widget build(BuildContext context) {
@@ -351,7 +1060,7 @@ class _SetupCommand extends StatelessWidget {
       SetupUiPhase.awaitingPreflight ||
       SetupUiPhase.awaitingUser => const SizedBox(width: 120),
       _ => FilledButton.icon(
-        onPressed: setup.start,
+        onPressed: runtimeBusy ? null : (ready ? onOpenUpdates : setup.start),
         icon: Icon(ready ? Icons.system_update_alt : Icons.download),
         label: Text(ready ? '检查更新' : '一键配置'),
       ),
@@ -612,6 +1321,22 @@ Future<void> _openExternal(BuildContext context, String url) async {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('无法打开链接')));
+    }
+  }
+}
+
+Future<void> _openDirectory(BuildContext context, String path) async {
+  try {
+    if (Platform.isMacOS) {
+      await Process.start('open', [path]);
+    } else if (Platform.isWindows) {
+      await Process.start('explorer.exe', [path], runInShell: true);
+    }
+  } on Object {
+    if (context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('无法打开目录')));
     }
   }
 }

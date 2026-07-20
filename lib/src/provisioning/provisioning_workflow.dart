@@ -20,6 +20,7 @@ import 'runtime_provisioning_action.dart';
 import 'runtime_target.dart';
 
 typedef RuntimeManifestSource = Future<RuntimeManifest> Function();
+typedef RuntimeSourceOrderer = List<Uri> Function(List<Uri> sources);
 
 final class ProvisioningWorkflow {
   ProvisioningWorkflow({
@@ -28,25 +29,43 @@ final class ProvisioningWorkflow {
     required ArtifactInstaller installer,
     RuntimeTarget? target,
     LicenseAcceptanceRegistry? licenseAcceptance,
+    RuntimeSourceOrderer? sourceOrderer,
     this.activateHostEnvironment = true,
   }) : _layout = layout,
        _downloads = downloads,
        _installer = installer,
        _target = target ?? RuntimeTarget.current(),
+       _sourceOrderer = sourceOrderer,
        _licenseAcceptance = licenseAcceptance ?? LicenseAcceptanceRegistry();
 
   final RuntimeLayout _layout;
   final DownloadManager _downloads;
   final ArtifactInstaller _installer;
   final RuntimeTarget _target;
+  final RuntimeSourceOrderer? _sourceOrderer;
   final LicenseAcceptanceRegistry _licenseAcceptance;
   final bool activateHostEnvironment;
 
-  Future<SetupOrchestrator> prepare(RuntimeManifestSource source) async {
+  Future<void> repairHostEnvironment() async {
+    await _layout.ensureCreated();
+    await _HostEnvironmentAction(
+      layout: _layout,
+      target: _target,
+    ).execute((_, _) {});
+  }
+
+  Future<SetupOrchestrator> prepare(
+    RuntimeManifestSource source, {
+    Set<String>? componentIds,
+  }) async {
     await _layout.ensureCreated();
     final manifest = await source();
     final activeVersions = await _layout.readActiveVersions();
-    final plan = ProvisioningPlan.fromManifest(manifest, _target);
+    final plan = ProvisioningPlan.fromManifest(
+      manifest,
+      _target,
+      componentIds: componentIds,
+    );
     final tasks = <SetupTaskDefinition>[];
     final actions = <String, SetupTaskAction>{};
 
@@ -81,6 +100,7 @@ final class ProvisioningWorkflow {
             jdkRoot: _layout.componentVersion(jdk.id, jdk.version).path,
             packages: androidSdk.packages,
             repositoryMirrorUrls: androidSdk.repositoryMirrorUrls,
+            repositorySourceOrderer: _sourceOrderer,
             isWindows: artifact.platform == RuntimePlatform.windows,
           );
         }

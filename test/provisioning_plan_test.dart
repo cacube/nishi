@@ -71,6 +71,30 @@ void main() {
 
     expect(plan.entries.map((entry) => entry.component.id), ['flutter']);
   });
+
+  test('selects one component together with its dependency closure', () {
+    final manifest = RuntimeManifest(
+      schemaVersion: 1,
+      components: [
+        _component('jdk'),
+        _component('android', dependencies: ['jdk']),
+        _component('flutter', dependencies: ['android']),
+        _component('go'),
+      ],
+    );
+
+    final plan = ProvisioningPlan.fromManifest(
+      manifest,
+      target,
+      componentIds: const {'flutter'},
+    );
+
+    expect(plan.entries.map((entry) => entry.component.id), [
+      'jdk',
+      'android',
+      'flutter',
+    ]);
+  });
 }
 
 RuntimeComponent _component(

@@ -7,6 +7,7 @@ import 'package:dev_environment_manager/src/environment/environment_controller.d
 import 'package:dev_environment_manager/src/install/artifact_installer.dart';
 import 'package:dev_environment_manager/src/manifest_security/remote_manifest_exceptions.dart';
 import 'package:dev_environment_manager/src/manifest_security/remote_manifest_release_configuration.dart';
+import 'package:dev_environment_manager/src/operation/runtime_operation_coordinator.dart';
 import 'package:dev_environment_manager/src/provisioning/runtime_target.dart';
 import 'package:dev_environment_manager/src/provisioning/provisioning_workflow.dart';
 import 'package:dev_environment_manager/src/runtime_manifest/runtime_manifest.dart';
@@ -17,6 +18,56 @@ import 'package:dev_environment_manager/src/storage/runtime_layout.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test(
+    'does not start setup while another runtime operation owns the lock',
+    () async {
+      final operations = RuntimeOperationCoordinator();
+      final lease = operations.tryAcquire('download-updates')!;
+      var prepared = false;
+      final controller = SetupUiController(
+        prepare: () async {
+          prepared = true;
+          return SetupOrchestrator(tasks: const [], actions: const {});
+        },
+        rescanEnvironment: () async {},
+        operations: operations,
+      );
+      addTearDown(controller.dispose);
+      addTearDown(operations.dispose);
+
+      await controller.start();
+
+      expect(prepared, isFalse);
+      expect(controller.state.phase, SetupUiPhase.failed);
+      expect(controller.state.errorMessage, contains('另一项环境操作'));
+      lease.release();
+    },
+  );
+
+  test(
+    'starts a selected component update through the selection preparer',
+    () async {
+      Set<String>? preparedIds;
+      final controller = SetupUiController(
+        prepare: () async =>
+            SetupOrchestrator(tasks: const [], actions: const {}),
+        prepareSelection: (componentIds) async {
+          preparedIds = componentIds;
+          return SetupOrchestrator(
+            tasks: const [SetupTaskDefinition(id: 'go', label: 'Go')],
+            actions: {'go': _ImmediateAction()},
+          );
+        },
+        rescanEnvironment: () async {},
+      );
+
+      await controller.startSelected(const {'go'});
+
+      expect(preparedIds, {'go'});
+      expect(controller.state.phase, SetupUiPhase.completed);
+    },
+  );
+
   test('prepares the signed manifest and mirrors task progress', () async {
     final preparation = Completer<SetupOrchestrator>();
     final action = _ControlledAction();
@@ -44,6 +95,31 @@ void main() {
 
     action.complete();
     await operation;
+  });
+
+  test('holds the runtime operation lock until setup completes', () async {
+    final operations = RuntimeOperationCoordinator();
+    final action = _ControlledAction();
+    final controller = SetupUiController(
+      prepare: () async => SetupOrchestrator(
+        tasks: const [SetupTaskDefinition(id: 'flutter', label: 'Flutter')],
+        actions: {'flutter': action},
+      ),
+      rescanEnvironment: () async {},
+      operations: operations,
+    );
+    addTearDown(controller.dispose);
+    addTearDown(operations.dispose);
+
+    final setup = controller.start();
+    await action.started.future;
+
+    expect(operations.activeOperation, 'configure-environment');
+    expect(operations.tryAcquire('clear-cache'), isNull);
+
+    action.complete();
+    await setup;
+    expect(operations.busy, isFalse);
   });
 
   test('rescans the environment after every task succeeds', () async {

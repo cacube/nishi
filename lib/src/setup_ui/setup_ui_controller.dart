@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../environment/environment_controller.dart';
 import '../manifest_security/remote_manifest_exceptions.dart';
 import '../manifest_security/remote_manifest_release_configuration.dart';
+import '../operation/runtime_operation_coordinator.dart';
 import '../provisioning/provisioning_plan.dart';
 import '../provisioning/provisioning_workflow.dart';
 import '../runtime_manifest/runtime_manifest_validator.dart';
@@ -13,19 +14,25 @@ import 'setup_ui_state.dart';
 export 'setup_ui_state.dart';
 
 typedef SetupOrchestratorPreparer = Future<SetupOrchestrator> Function();
+typedef SetupSelectionPreparer =
+    Future<SetupOrchestrator> Function(Set<String> componentIds);
 typedef EnvironmentRescan = Future<void> Function();
 typedef PreflightAccepted = void Function(Set<String> acceptedIds);
 
 final class SetupUiController extends ChangeNotifier {
   SetupUiController({
     required SetupOrchestratorPreparer prepare,
+    SetupSelectionPreparer? prepareSelection,
     required EnvironmentRescan rescanEnvironment,
     List<SetupPreflightConfirmation> preflightConfirmations = const [],
     PreflightAccepted? onPreflightAccepted,
+    RuntimeOperationCoordinator? operations,
   }) : _prepare = prepare,
+       _prepareSelection = prepareSelection,
        _rescanEnvironment = rescanEnvironment,
        _preflightConfirmations = List.unmodifiable(preflightConfirmations),
-       _onPreflightAccepted = onPreflightAccepted;
+       _onPreflightAccepted = onPreflightAccepted,
+       _operations = operations;
 
   factory SetupUiController.forRemoteRelease({
     required ProvisioningWorkflow workflow,
@@ -34,6 +41,7 @@ final class SetupUiController extends ChangeNotifier {
     required List<SetupPreflightConfirmation> preflightConfirmations,
     PreflightAccepted? onPreflightAccepted,
     RuntimeManifestSource? manifestSourceOverride,
+    RuntimeOperationCoordinator? operations,
   }) {
     final RuntimeManifestSource manifestSource;
     if (manifestSourceOverride != null) {
@@ -53,17 +61,24 @@ final class SetupUiController extends ChangeNotifier {
     }
     return SetupUiController(
       prepare: () => workflow.prepare(manifestSource),
+      prepareSelection: (componentIds) =>
+          workflow.prepare(manifestSource, componentIds: componentIds),
       rescanEnvironment: environmentController.scan,
       preflightConfirmations: preflightConfirmations,
       onPreflightAccepted: onPreflightAccepted,
+      operations: operations,
     );
   }
 
   final SetupOrchestratorPreparer _prepare;
+  final SetupSelectionPreparer? _prepareSelection;
   final EnvironmentRescan _rescanEnvironment;
   final List<SetupPreflightConfirmation> _preflightConfirmations;
   final PreflightAccepted? _onPreflightAccepted;
+  final RuntimeOperationCoordinator? _operations;
+  RuntimeOperationLease? _operationLease;
   SetupOrchestrator? _orchestrator;
+  SetupOrchestratorPreparer? _lastPrepare;
   bool _cancelRequested = false;
 
   SetupUiState state = const SetupUiState();
@@ -81,12 +96,13 @@ final class SetupUiController extends ChangeNotifier {
       state = state.copyWith(phase: SetupUiPhase.cancelled);
       notifyListeners();
     }
+    _releaseOperationIfTerminal();
   }
 
   Future<void> retry() async {
     if (state.phase != SetupUiPhase.failed) return;
     if (_orchestrator == null) {
-      await start();
+      await _startWith(_lastPrepare ?? _prepare);
     } else {
       await retryFailed();
     }
@@ -96,6 +112,7 @@ final class SetupUiController extends ChangeNotifier {
     if (state.phase != SetupUiPhase.failed) return;
     final orchestrator = _orchestrator;
     if (orchestrator == null) return;
+    if (!_beginOperation()) return;
     state = state.copyWith(phase: SetupUiPhase.running, clearError: true);
     notifyListeners();
     await orchestrator.retryFailed();
@@ -119,13 +136,29 @@ final class SetupUiController extends ChangeNotifier {
   }
 
   Future<void> start() async {
+    await _startWith(_prepare);
+  }
+
+  Future<void> startSelected(Set<String> componentIds) async {
+    if (componentIds.isEmpty) return;
+    final prepareSelection = _prepareSelection;
+    if (prepareSelection == null) {
+      throw StateError('Selected component updates are unavailable');
+    }
+    final selected = Set<String>.unmodifiable(componentIds);
+    await _startWith(() => prepareSelection(selected));
+  }
+
+  Future<void> _startWith(SetupOrchestratorPreparer prepare) async {
     if (!_canStart) return;
+    if (!_beginOperation()) return;
+    _lastPrepare = prepare;
     _clearOrchestrator();
     _cancelRequested = false;
     state = const SetupUiState(phase: SetupUiPhase.preparing);
     notifyListeners();
     try {
-      final orchestrator = await _prepare();
+      final orchestrator = await prepare();
       if (_cancelRequested) {
         state = state.copyWith(
           phase: SetupUiPhase.cancelled,
@@ -134,6 +167,7 @@ final class SetupUiController extends ChangeNotifier {
           clearError: true,
         );
         notifyListeners();
+        _releaseOperationIfTerminal();
         return;
       }
       _orchestrator = orchestrator;
@@ -155,7 +189,13 @@ final class SetupUiController extends ChangeNotifier {
         notifyListeners();
         return;
       }
-      _syncFromOrchestrator();
+      state = state.copyWith(
+        phase: SetupUiPhase.running,
+        tasks: orchestrator.tasks.map(_mapTask).toList(growable: false),
+        progress: orchestrator.progress,
+        clearError: true,
+      );
+      notifyListeners();
       await orchestrator.run();
       _syncFromOrchestrator();
       if (orchestrator.completed) {
@@ -165,6 +205,7 @@ final class SetupUiController extends ChangeNotifier {
       if (_cancelRequested) {
         state = state.copyWith(phase: SetupUiPhase.cancelled, clearError: true);
         notifyListeners();
+        _releaseOperationIfTerminal();
         return;
       }
       state = state.copyWith(
@@ -172,6 +213,7 @@ final class SetupUiController extends ChangeNotifier {
         errorMessage: _displayError(error),
       );
       notifyListeners();
+      _releaseOperationIfTerminal();
     }
   }
 
@@ -194,6 +236,7 @@ final class SetupUiController extends ChangeNotifier {
       clearError: true,
     );
     notifyListeners();
+    _releaseOperationIfTerminal();
     await orchestrator.run();
     _syncFromOrchestrator();
     if (orchestrator.completed) {
@@ -255,6 +298,7 @@ final class SetupUiController extends ChangeNotifier {
       clearError: phase != SetupUiPhase.failed,
     );
     notifyListeners();
+    _releaseOperationIfTerminal();
   }
 
   SetupUiPhase _phaseAfterRun(SetupOrchestrator orchestrator) {
@@ -303,9 +347,41 @@ final class SetupUiController extends ChangeNotifier {
     _orchestrator = null;
   }
 
+  bool _beginOperation() {
+    if (_operationLease != null) return true;
+    final coordinator = _operations;
+    if (coordinator == null) return true;
+    final lease = coordinator.tryAcquire('configure-environment');
+    if (lease == null) {
+      state = state.copyWith(
+        phase: SetupUiPhase.failed,
+        errorMessage: '另一项环境操作正在进行，请稍后重试。',
+      );
+      notifyListeners();
+      return false;
+    }
+    _operationLease = lease;
+    return true;
+  }
+
+  void _releaseOperationIfTerminal() {
+    final terminal = switch (state.phase) {
+      SetupUiPhase.idle ||
+      SetupUiPhase.failed ||
+      SetupUiPhase.cancelled ||
+      SetupUiPhase.completed => true,
+      _ => false,
+    };
+    if (!terminal) return;
+    _operationLease?.release();
+    _operationLease = null;
+  }
+
   @override
   void dispose() {
     _clearOrchestrator();
+    _operationLease?.release();
+    _operationLease = null;
     super.dispose();
   }
 }

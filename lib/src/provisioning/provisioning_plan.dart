@@ -19,8 +19,9 @@ final class ProvisioningPlan {
 
   factory ProvisioningPlan.fromManifest(
     RuntimeManifest manifest,
-    RuntimeTarget target,
-  ) {
+    RuntimeTarget target, {
+    Set<String>? componentIds,
+  }) {
     final errors = <String>[];
     final entriesById = <String, ProvisioningPlanEntry>{};
 
@@ -75,8 +76,16 @@ final class ProvisioningPlan {
       ordered.add(entry);
     }
 
+    final selectedIds = componentIds ?? entriesById.keys.toSet();
+    for (final selectedId in selectedIds) {
+      if (!entriesById.containsKey(selectedId)) {
+        errors.add('$selectedId: component is not available for $target');
+      }
+    }
+    if (errors.isNotEmpty) throw ProvisioningPlanException(errors);
+
     for (final component in manifest.components) {
-      if (entriesById.containsKey(component.id)) visit(component.id);
+      if (selectedIds.contains(component.id)) visit(component.id);
     }
     return ProvisioningPlan._(
       target: target,

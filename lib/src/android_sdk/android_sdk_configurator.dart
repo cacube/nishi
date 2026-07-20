@@ -5,6 +5,8 @@ import 'dart:io';
 typedef AndroidSdkProgressCallback =
     void Function(AndroidSdkConfigurationProgress progress);
 typedef AndroidSdkRepositoryProbe = Future<bool> Function(Uri repositoryUrl);
+typedef AndroidSdkRepositorySourceOrderer =
+    List<Uri> Function(List<Uri> repositoryUrls);
 
 enum AndroidSdkConfigurationStage { licenses, packages, completed }
 
@@ -125,12 +127,14 @@ final class AndroidSdkConfigurator {
     AndroidSdkProcessStarter processStarter =
         const SystemAndroidSdkProcessStarter(),
     AndroidSdkRepositoryProbe repositoryProbe = _probeAndroidSdkRepository,
+    AndroidSdkRepositorySourceOrderer? repositorySourceOrderer,
     this.processTimeout = const Duration(minutes: 20),
     bool? isWindows,
   }) : packages = List.unmodifiable(packages),
        repositoryMirrorUrls = List.unmodifiable(repositoryMirrorUrls),
        _processStarter = processStarter,
        _repositoryProbe = repositoryProbe,
+       _repositorySourceOrderer = repositorySourceOrderer,
        isWindows = isWindows ?? Platform.isWindows;
 
   final String sdkRoot;
@@ -141,6 +145,7 @@ final class AndroidSdkConfigurator {
   final bool isWindows;
   final AndroidSdkProcessStarter _processStarter;
   final AndroidSdkRepositoryProbe _repositoryProbe;
+  final AndroidSdkRepositorySourceOrderer? _repositorySourceOrderer;
   AndroidSdkProcess? _activeProcess;
   bool _cancelRequested = false;
 
@@ -220,10 +225,15 @@ final class AndroidSdkConfigurator {
   }
 
   Future<Uri> _selectRepository(AndroidSdkProgressCallback? onProgress) async {
-    final repositoryUrls = [
+    final configuredUrls = [
       Uri.parse(_officialRepositoryBaseUrl),
       ...repositoryMirrorUrls,
     ];
+    final repositoryUrls =
+        _repositorySourceOrderer?.call(configuredUrls) ?? configuredUrls;
+    if (repositoryUrls.isEmpty) {
+      throw StateError('Android SDK repository source list is empty');
+    }
     if (repositoryUrls.length == 1) return repositoryUrls.single;
     for (var index = 0; index < repositoryUrls.length; index++) {
       if (await _repositoryProbe(repositoryUrls[index])) {
@@ -237,7 +247,7 @@ final class AndroidSdkConfigurator {
           const AndroidSdkConfigurationProgress(
             stage: AndroidSdkConfigurationStage.licenses,
             fraction: 0,
-            message: '官网连接失败，正在切换 Android 国内镜像',
+            message: '当前 Android 仓库不可用，正在切换备用源',
           ),
         );
       }
@@ -245,7 +255,7 @@ final class AndroidSdkConfigurator {
     throw AndroidSdkConfigurationException(
       stage: AndroidSdkConfigurationStage.licenses,
       exitCode: _repositoryUnavailableExitCode,
-      details: '官方仓库和国内镜像均不可用',
+      details: '配置的 Android SDK 仓库均不可用',
     );
   }
 

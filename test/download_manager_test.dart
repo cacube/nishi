@@ -337,6 +337,33 @@ void main() {
     manager.close();
   });
 
+  test('applies a dynamic source ordering policy', () async {
+    final requestedPaths = <String>[];
+    server.listen((request) async {
+      requestedPaths.add(request.uri.path);
+      request.response.add([104, 101, 108, 108, 111]);
+      await request.response.close();
+    });
+    final manager = DownloadManager(
+      sourceOrderer: (sources) => [sources.last, sources.first],
+    );
+
+    final result = await manager.downloadFromSources(
+      sources: [
+        _serverUri(server).replace(path: '/official.zip'),
+        _serverUri(server).replace(path: '/mirror.zip'),
+      ],
+      destinationDirectory: destinationDirectory,
+      fileName: 'runtime.zip',
+      expectedSha256:
+          '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824',
+    );
+
+    expect(requestedPaths, ['/mirror.zip']);
+    expect(result.sourceUri?.path, '/mirror.zip');
+    manager.close();
+  });
+
   test('cancellation stops without requesting a mirror', () async {
     final requestedPaths = <String>[];
     final releaseResponse = Completer<void>();

@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 typedef AndroidSdkProgressCallback =
     void Function(AndroidSdkConfigurationProgress progress);
+typedef AndroidSdkRepositoryProbe = Future<bool> Function(Uri repositoryUrl);
 
 enum AndroidSdkConfigurationStage { licenses, packages, completed }
 
@@ -119,18 +121,26 @@ final class AndroidSdkConfigurator {
     required this.sdkRoot,
     required this.jdkRoot,
     required List<String> packages,
+    List<Uri> repositoryMirrorUrls = const [],
     AndroidSdkProcessStarter processStarter =
         const SystemAndroidSdkProcessStarter(),
+    AndroidSdkRepositoryProbe repositoryProbe = _probeAndroidSdkRepository,
+    this.processTimeout = const Duration(minutes: 20),
     bool? isWindows,
   }) : packages = List.unmodifiable(packages),
+       repositoryMirrorUrls = List.unmodifiable(repositoryMirrorUrls),
        _processStarter = processStarter,
+       _repositoryProbe = repositoryProbe,
        isWindows = isWindows ?? Platform.isWindows;
 
   final String sdkRoot;
   final String jdkRoot;
   final List<String> packages;
+  final List<Uri> repositoryMirrorUrls;
+  final Duration processTimeout;
   final bool isWindows;
   final AndroidSdkProcessStarter _processStarter;
+  final AndroidSdkRepositoryProbe _repositoryProbe;
   AndroidSdkProcess? _activeProcess;
   bool _cancelRequested = false;
 
@@ -149,10 +159,15 @@ final class AndroidSdkConfigurator {
     _cancelRequested = false;
 
     final executable = _sdkManagerExecutable;
-    final environment = {
+    final repositoryUrl = await _selectRepository(onProgress);
+    if (_cancelRequested) {
+      throw const AndroidSdkConfigurationCancelledException();
+    }
+    final environment = <String, String>{
       'JAVA_HOME': jdkRoot,
       'ANDROID_HOME': sdkRoot,
       'ANDROID_SDK_ROOT': sdkRoot,
+      _sdkRepositoryEnvironmentKey: repositoryUrl.toString(),
     };
     onProgress?.call(
       const AndroidSdkConfigurationProgress(
@@ -204,6 +219,36 @@ final class AndroidSdkConfigurator {
     return [root, 'cmdline-tools', 'latest', 'bin', name].join(separator);
   }
 
+  Future<Uri> _selectRepository(AndroidSdkProgressCallback? onProgress) async {
+    final repositoryUrls = [
+      Uri.parse(_officialRepositoryBaseUrl),
+      ...repositoryMirrorUrls,
+    ];
+    if (repositoryUrls.length == 1) return repositoryUrls.single;
+    for (var index = 0; index < repositoryUrls.length; index++) {
+      if (await _repositoryProbe(repositoryUrls[index])) {
+        return repositoryUrls[index];
+      }
+      if (_cancelRequested) {
+        throw const AndroidSdkConfigurationCancelledException();
+      }
+      if (index + 1 < repositoryUrls.length) {
+        onProgress?.call(
+          const AndroidSdkConfigurationProgress(
+            stage: AndroidSdkConfigurationStage.licenses,
+            fraction: 0,
+            message: '官网连接失败，正在切换 Android 国内镜像',
+          ),
+        );
+      }
+    }
+    throw AndroidSdkConfigurationException(
+      stage: AndroidSdkConfigurationStage.licenses,
+      exitCode: _repositoryUnavailableExitCode,
+      details: '官方仓库和国内镜像均不可用',
+    );
+  }
+
   Future<void> _runProcess(
     AndroidSdkProcessRequest request, {
     required AndroidSdkConfigurationStage stage,
@@ -241,11 +286,36 @@ final class AndroidSdkConfigurator {
         process.writeToStdin(stdin);
         await process.closeStdin();
       }
-      final exitCode = await process.exitCode;
-      final output = await stdout;
-      final errorOutput = await stderr;
+      var timedOut = false;
+      final exitCode = await process.exitCode.timeout(
+        processTimeout,
+        onTimeout: () {
+          timedOut = true;
+          process.kill();
+          return _processTimeoutExitCode;
+        },
+      );
+      final output = timedOut
+          ? await stdout.timeout(
+              const Duration(seconds: 5),
+              onTimeout: () => '',
+            )
+          : await stdout;
+      final errorOutput = timedOut
+          ? await stderr.timeout(
+              const Duration(seconds: 5),
+              onTimeout: () => '',
+            )
+          : await stderr;
       if (_cancelRequested) {
         throw const AndroidSdkConfigurationCancelledException();
+      }
+      if (timedOut) {
+        throw AndroidSdkConfigurationException(
+          stage: stage,
+          exitCode: _processTimeoutExitCode,
+          details: '运行超过 ${processTimeout.inMinutes} 分钟，已停止',
+        );
       }
       if (exitCode != 0) {
         throw AndroidSdkConfigurationException(
@@ -259,6 +329,41 @@ final class AndroidSdkConfigurator {
         _activeProcess = null;
       }
     }
+  }
+}
+
+const _sdkRepositoryEnvironmentKey = 'SDK_TEST_BASE_URL';
+const _officialRepositoryBaseUrl = 'https://dl.google.com/android/repository/';
+const _repositoryUnavailableExitCode = -2;
+const _processTimeoutExitCode = -1;
+
+Future<bool> _probeAndroidSdkRepository(Uri repositoryUrl) async {
+  final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+  HttpClientRequest? request;
+  try {
+    request = await client
+        .getUrl(repositoryUrl.resolve('repository2-3.xml'))
+        .timeout(const Duration(seconds: 15));
+    request.followRedirects = false;
+    request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
+    final response = await request.close().timeout(const Duration(seconds: 15));
+    if (response.statusCode != HttpStatus.ok) {
+      request.abort();
+      return false;
+    }
+    await response.drain<void>().timeout(const Duration(seconds: 30));
+    return true;
+  } on SocketException {
+    return false;
+  } on HttpException {
+    return false;
+  } on HandshakeException {
+    return false;
+  } on TimeoutException {
+    request?.abort();
+    return false;
+  } finally {
+    client.close(force: true);
   }
 }
 

@@ -15,14 +15,15 @@ The application installs, detects, configures, updates, and repairs development 
 - Strict runtime manifest parsing and validation for platform artifacts,
   dependencies, services, HTTPS sources, and SHA-256 digests.
 - Resumable downloads with verified cache reuse, cancellation, timeouts,
-  progress reporting, integrity checks, and safe target activation.
+  progress reporting, integrity checks, official-first automatic China mirror
+  fallback, and safe target activation.
 - Version compatibility checks plus protocol-level MySQL and Redis probes.
 - User-scoped cache, runtime, data, and log directory layout.
 - Dependency-aware setup orchestration with isolated failures and focused retry.
 - Ed25519 verification of detached remote manifest signatures before JSON parsing.
 - A production runtime manifest with pinned Flutter, JDK, Android SDK, Go,
-  Node.js, and MySQL artifacts from official HTTPS endpoints and verified
-  SHA-256 digests.
+  Node.js, and MySQL artifacts, official HTTPS endpoints, reviewed exact-byte
+  China mirrors where available, and verified SHA-256 digests.
 - Host platform and architecture artifact selection with dependency ordering.
 - ZIP/TAR.GZ/RAW staging, traversal checks, executable verification, and atomic activation.
 - Explicit user-confirmation/elevation plans for DMG/PKG/MSI/EXE installers.

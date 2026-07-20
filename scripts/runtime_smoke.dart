@@ -694,8 +694,8 @@ Future<void> runRuntimeSmoke(RuntimeSmokeArguments options) async {
         );
       }
       var reportedTenths = -1;
-      final result = await downloads.download(
-        source: artifact.officialUrl,
+      final result = await downloads.downloadFromSources(
+        sources: artifact.downloadUrls,
         destinationDirectory: layout.cache,
         fileName: _cacheFileName(entry.component, artifact),
         expectedSha256: artifact.sha256,
@@ -706,6 +706,13 @@ Future<void> runRuntimeSmoke(RuntimeSmokeArguments options) async {
           if (tenths == reportedTenths) return;
           reportedTenths = tenths;
           stdout.writeln('DOWNLOAD ${entry.component.id} ${tenths * 10}%');
+        },
+        onSourceChanged: (source, sourceIndex) {
+          if (sourceIndex > 0) {
+            stdout.writeln(
+              'DOWNLOAD_FALLBACK ${entry.component.id} source=$source',
+            );
+          }
         },
       );
       stdout.writeln(
@@ -756,6 +763,7 @@ Future<void> runRuntimeSmoke(RuntimeSmokeArguments options) async {
           sdkRoot: installResult.activeDirectory!.path,
           jdkRoot: jdkRoot.path,
           packages: metadata.packages,
+          repositoryMirrorUrls: metadata.repositoryMirrorUrls,
         ).configure(
           licensesAccepted: true,
           onProgress: (progress) {

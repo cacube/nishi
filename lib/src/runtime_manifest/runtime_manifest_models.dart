@@ -78,10 +78,13 @@ class RuntimeComponent {
 class RuntimeAndroidSdkMetadata {
   RuntimeAndroidSdkMetadata({
     required List<String> packages,
+    List<Uri> repositoryMirrorUrls = const [],
     required this.license,
-  }) : packages = List.unmodifiable(packages);
+  }) : packages = List.unmodifiable(packages),
+       repositoryMirrorUrls = List.unmodifiable(repositoryMirrorUrls);
 
   final List<String> packages;
+  final List<Uri> repositoryMirrorUrls;
   final RuntimeLicenseMetadata license;
 }
 
@@ -102,21 +105,25 @@ class RuntimeArtifact {
     required this.platform,
     required this.architecture,
     required this.officialUrl,
+    List<Uri> mirrorUrls = const [],
     required this.sha256,
     required this.archiveType,
     this.archiveRoot = '',
     this.installSubdirectory = '',
-  });
+  }) : mirrorUrls = List.unmodifiable(mirrorUrls);
 
   final RuntimePlatform platform;
   final RuntimeArchitecture architecture;
   final Uri officialUrl;
+  final List<Uri> mirrorUrls;
   final String sha256;
   final RuntimeArchiveType archiveType;
   final String archiveRoot;
   final String installSubdirectory;
 
   String get targetKey => '${platform.jsonValue}/${architecture.jsonValue}';
+
+  List<Uri> get downloadUrls => List.unmodifiable([officialUrl, ...mirrorUrls]);
 }
 
 class RuntimeExecutable {

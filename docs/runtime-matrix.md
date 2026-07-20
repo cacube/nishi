@@ -22,6 +22,16 @@ The managed Android profile installs the minimum packages required to build for
 Android. Emulator images, AVD creation, NDK, and CMake are a separate optional
 profile because they are large and require host virtualization checks.
 
-Every managed artifact URL in `release/runtime-manifest.json` uses the vendor's
-official HTTPS endpoint and has a pinned SHA-256 digest. The signed release
-manifest is the source of truth for updates.
+Every managed artifact in `release/runtime-manifest.json` keeps the vendor's
+official HTTPS endpoint first and has a pinned SHA-256 digest. Reviewed China
+mirror URLs are optional fallbacks and must serve the exact same bytes. Nishi
+discards partial data when changing sources and verifies the same SHA-256 before
+installation. Components without a verified exact-byte mirror remain
+official-only. The signed release manifest is the source of truth for updates.
+
+Android command-line tools follow that artifact rule. The later API,
+build-tools, and platform-tools installation is delegated to the pinned Google
+`sdkmanager`: it tries Google's international repository first and then the
+Google China repository from the signed manifest. Those dynamic repository
+packages use the checksums supplied by Google's repository metadata and are not
+claimed as separate Nishi SHA-256-pinned artifacts.

@@ -146,6 +146,41 @@ void main() {
     expect(progress.last.value, 1);
     downloads.close();
   });
+
+  test('automatically uses a mirror when the official source fails', () async {
+    final bytes = utf8.encode('runtime executable');
+    final requestedPaths = <String>[];
+    server.listen((request) async {
+      requestedPaths.add(request.uri.path);
+      if (request.uri.path == '/official') {
+        request.response.statusCode = HttpStatus.serviceUnavailable;
+      } else {
+        request.response.add(bytes);
+      }
+      await request.response.close();
+    });
+    final downloads = DownloadManager();
+    final messages = <String?>[];
+    final action = RuntimeProvisioningAction(
+      component: _component(),
+      artifact: _artifact(
+        server,
+        RuntimeArchiveType.raw,
+        sha256.convert(bytes).toString(),
+        officialPath: '/official',
+        mirrorPaths: const ['/mirror'],
+      ),
+      layout: layout,
+      downloads: downloads,
+      installer: ArtifactInstaller(layout: layout),
+    );
+
+    await action.execute((_, message) => messages.add(message));
+
+    expect(requestedPaths, ['/official', '/mirror']);
+    expect(messages, contains('官网连接失败，正在切换国内镜像'));
+    downloads.close();
+  });
 }
 
 RuntimeComponent _component() {
@@ -170,14 +205,22 @@ RuntimeComponent _component() {
 RuntimeArtifact _artifact(
   HttpServer server,
   RuntimeArchiveType archiveType,
-  String digest,
-) {
+  String digest, {
+  String officialPath = '/runtime',
+  List<String> mirrorPaths = const [],
+}) {
   return RuntimeArtifact(
     platform: RuntimePlatform.macos,
     architecture: RuntimeArchitecture.arm64,
     officialUrl: Uri.parse(
-      'http://${server.address.host}:${server.port}/runtime',
+      'http://${server.address.host}:${server.port}$officialPath',
     ),
+    mirrorUrls: mirrorPaths
+        .map(
+          (path) =>
+              Uri.parse('http://${server.address.host}:${server.port}$path'),
+        )
+        .toList(),
     sha256: digest,
     archiveType: archiveType,
   );

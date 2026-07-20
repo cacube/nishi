@@ -4,6 +4,22 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 
 typedef DownloadProgressCallback = void Function(DownloadProgress progress);
+typedef DownloadSourceFailureCallback =
+    void Function(DownloadSourceFailure failure);
+
+enum DownloadSourceFailureKind { timeout, integrity, http, network, tls }
+
+final class DownloadSourceFailure {
+  const DownloadSourceFailure({
+    required this.source,
+    required this.kind,
+    required this.error,
+  });
+
+  final Uri source;
+  final DownloadSourceFailureKind kind;
+  final Object error;
+}
 
 final class DownloadProgress {
   const DownloadProgress({
@@ -21,10 +37,17 @@ final class DownloadProgress {
 }
 
 final class DownloadResult {
-  const DownloadResult({required this.file, required this.fromCache});
+  const DownloadResult({
+    required this.file,
+    required this.fromCache,
+    required this.sourceUri,
+    this.usedFallback = false,
+  });
 
   final File file;
   final bool fromCache;
+  final Uri? sourceUri;
+  final bool usedFallback;
 }
 
 final class DownloadCancellationToken {
@@ -63,7 +86,7 @@ final class DownloadCancellationToken {
 final class DownloadManager {
   DownloadManager({
     HttpClient? httpClient,
-    this.timeout = const Duration(minutes: 5),
+    this.timeout = const Duration(seconds: 30),
   }) : assert(timeout > Duration.zero),
        _httpClient = httpClient ?? HttpClient(),
        _ownsHttpClient = httpClient == null {
@@ -73,6 +96,123 @@ final class DownloadManager {
   final HttpClient _httpClient;
   final bool _ownsHttpClient;
   final Duration timeout;
+
+  Future<DownloadResult> downloadFromSources({
+    required List<Uri> sources,
+    required Directory destinationDirectory,
+    required String fileName,
+    required String expectedSha256,
+    DownloadProgressCallback? onProgress,
+    DownloadCancellationToken? cancellationToken,
+    void Function(Uri source, int sourceIndex)? onSourceChanged,
+    DownloadSourceFailureCallback? onSourceFailure,
+  }) async {
+    if (sources.isEmpty) {
+      throw ArgumentError.value(sources, 'sources', 'Must not be empty');
+    }
+    _validateFileName(fileName);
+    final normalizedSha256 = _normalizeSha256(expectedSha256);
+    await destinationDirectory.create(recursive: true);
+    final target = File(
+      '${destinationDirectory.path}${Platform.pathSeparator}$fileName',
+    );
+    final partial = File('${target.path}.part');
+    final partialSource = File('${partial.path}.source');
+    if (await target.exists() && await _sha256Of(target) == normalizedSha256) {
+      cancellationToken?.throwIfCancelled();
+      if (await partial.exists()) await partial.delete();
+      if (await partialSource.exists()) await partialSource.delete();
+      final cachedBytes = await target.length();
+      onProgress?.call(
+        DownloadProgress(downloadedBytes: cachedBytes, totalBytes: cachedBytes),
+      );
+      return DownloadResult(file: target, fromCache: true, sourceUri: null);
+    }
+    Object? lastError;
+    StackTrace? lastStackTrace;
+    final failures = <DownloadSourceFailure>[];
+    for (var index = 0; index < sources.length; index++) {
+      cancellationToken?.throwIfCancelled();
+      final source = sources[index];
+      await _preparePartialForSource(
+        partial: partial,
+        metadata: partialSource,
+        source: source,
+        expectedSha256: normalizedSha256,
+      );
+      onSourceChanged?.call(source, index);
+      DownloadSourceFailure? failure;
+      try {
+        final result = await download(
+          source: source,
+          destinationDirectory: destinationDirectory,
+          fileName: fileName,
+          expectedSha256: expectedSha256,
+          onProgress: onProgress,
+          cancellationToken: cancellationToken,
+        );
+        if (await partialSource.exists()) await partialSource.delete();
+        return DownloadResult(
+          file: result.file,
+          fromCache: result.fromCache,
+          sourceUri: result.sourceUri,
+          usedFallback: index > 0,
+        );
+      } on DownloadCancelledException {
+        rethrow;
+      } on DownloadTimeoutException catch (error, stackTrace) {
+        lastError = error;
+        lastStackTrace = stackTrace;
+        failure = DownloadSourceFailure(
+          source: source,
+          kind: DownloadSourceFailureKind.timeout,
+          error: error,
+        );
+      } on DownloadIntegrityException catch (error, stackTrace) {
+        lastError = error;
+        lastStackTrace = stackTrace;
+        failure = DownloadSourceFailure(
+          source: source,
+          kind: DownloadSourceFailureKind.integrity,
+          error: error,
+        );
+      } on HttpException catch (error, stackTrace) {
+        lastError = error;
+        lastStackTrace = stackTrace;
+        failure = DownloadSourceFailure(
+          source: source,
+          kind: DownloadSourceFailureKind.http,
+          error: error,
+        );
+      } on SocketException catch (error, stackTrace) {
+        lastError = error;
+        lastStackTrace = stackTrace;
+        failure = DownloadSourceFailure(
+          source: source,
+          kind: DownloadSourceFailureKind.network,
+          error: error,
+        );
+      } on HandshakeException catch (error, stackTrace) {
+        lastError = error;
+        lastStackTrace = stackTrace;
+        failure = DownloadSourceFailure(
+          source: source,
+          kind: DownloadSourceFailureKind.tls,
+          error: error,
+        );
+      }
+
+      failures.add(failure);
+      if (index + 1 < sources.length) {
+        onSourceFailure?.call(failure);
+      }
+    }
+
+    if (failures.length > 1) {
+      throw DownloadSourcesExhaustedException(failures);
+    }
+    Error.throwWithStackTrace(lastError!, lastStackTrace!);
+  }
 
   Future<DownloadResult> download({
     required Uri source,
@@ -100,7 +240,7 @@ final class DownloadManager {
       onProgress?.call(
         DownloadProgress(downloadedBytes: cachedBytes, totalBytes: cachedBytes),
       );
-      return DownloadResult(file: target, fromCache: true);
+      return DownloadResult(file: target, fromCache: true, sourceUri: null);
     }
 
     final partialLength = await partial.exists() ? await partial.length() : 0;
@@ -135,15 +275,12 @@ final class DownloadManager {
       }
 
       if (response.statusCode != HttpStatus.ok && !resumesDownload) {
-        await _drainResponse(
-          openedResponse,
-          source: source,
-          cancellationToken: cancellationToken,
-        );
-        throw HttpException(
+        final error = HttpException(
           'Download failed with HTTP ${response.statusCode}',
           uri: source,
         );
+        openedResponse.abort(error);
+        throw error;
       }
 
       await _writeResponse(
@@ -174,7 +311,7 @@ final class DownloadManager {
     }
 
     await _activate(partial: partial, target: target);
-    return DownloadResult(file: target, fromCache: false);
+    return DownloadResult(file: target, fromCache: false, sourceUri: source);
   }
 
   Future<_OpenedResponse> _openResponse(
@@ -241,15 +378,10 @@ final class DownloadManager {
             uri: redirectSource,
           );
         }
-        try {
-          await _drainResponse(
-            openedResponse,
-            source: currentSource,
-            cancellationToken: cancellationToken,
-          );
-        } finally {
-          openedResponse.dispose();
-        }
+        openedResponse.abort(
+          const HttpException('Following verified HTTPS redirect'),
+        );
+        openedResponse.dispose();
         currentSource = redirectSource;
       } catch (_) {
         removeCancellationListener?.call();
@@ -350,29 +482,6 @@ final class DownloadManager {
     }
   }
 
-  Future<void> _drainResponse(
-    _OpenedResponse openedResponse, {
-    required Uri source,
-    required DownloadCancellationToken? cancellationToken,
-  }) async {
-    final timeoutError = DownloadTimeoutException(
-      source: source,
-      timeout: timeout,
-    );
-    try {
-      await openedResponse.response.drain<void>().timeout(
-        timeout,
-        onTimeout: () {
-          openedResponse.abort(timeoutError);
-          throw timeoutError;
-        },
-      );
-    } catch (_) {
-      cancellationToken?.throwIfCancelled();
-      rethrow;
-    }
-  }
-
   void close({bool force = false}) {
     if (_ownsHttpClient) {
       _httpClient.close(force: force);
@@ -410,6 +519,17 @@ final class DownloadIntegrityException implements Exception {
   @override
   String toString() =>
       'DownloadIntegrityException(expected: $expectedSha256, actual: $actualSha256)';
+}
+
+final class DownloadSourcesExhaustedException implements Exception {
+  DownloadSourcesExhaustedException(List<DownloadSourceFailure> failures)
+    : failures = List.unmodifiable(failures);
+
+  final List<DownloadSourceFailure> failures;
+
+  @override
+  String toString() =>
+      'All download sources failed:\n${failures.map((failure) => '- ${failure.source} [${failure.kind.name}]: ${failure.error}').join('\n')}';
 }
 
 final class _OpenedResponse {
@@ -463,6 +583,24 @@ void _validateFileName(String fileName) {
 
 Future<String> _sha256Of(File file) async =>
     (await sha256.bind(file.openRead()).first).toString();
+
+Future<void> _preparePartialForSource({
+  required File partial,
+  required File metadata,
+  required Uri source,
+  required String expectedSha256,
+}) async {
+  final identity = '$expectedSha256\n$source\n';
+  if (await partial.exists()) {
+    final matches =
+        await metadata.exists() && await metadata.readAsString() == identity;
+    if (!matches) await partial.delete();
+  }
+  if (!await partial.exists() && await metadata.exists()) {
+    await metadata.delete();
+  }
+  await metadata.writeAsString(identity, flush: true);
+}
 
 bool _rangeStartsAt(HttpClientResponse response, int expectedStart) {
   final contentRange = response.headers.value(HttpHeaders.contentRangeHeader);

@@ -46,14 +46,20 @@ final class RuntimeProvisioningAction implements CancellableSetupTaskAction {
     _cancellationToken = token;
     try {
       onProgress(0, '正在下载');
-      final download = await _downloads.download(
-        source: artifact.officialUrl,
+      final download = await _downloads.downloadFromSources(
+        sources: artifact.downloadUrls,
         destinationDirectory: _layout.cache,
         fileName: _cacheFileName(),
         expectedSha256: artifact.sha256,
         cancellationToken: token,
         onProgress: (progress) {
           onProgress((progress.fraction ?? 0).clamp(0, 1) * 0.8, '正在下载');
+        },
+        onSourceFailure: (failure) {
+          final message = failure.kind == DownloadSourceFailureKind.integrity
+              ? '下载文件校验失败，正在切换国内镜像'
+              : '官网连接失败，正在切换国内镜像';
+          onProgress(0, message);
         },
       );
       token.throwIfCancelled();

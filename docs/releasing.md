@@ -1,14 +1,15 @@
 # Release and Runtime Manifest Signing
 
 Nishi downloads runtime metadata from GitHub Releases. Runtime binaries remain
-on their vendors' official HTTPS download endpoints; GitHub Releases contains
-only the signed manifest and its detached signature envelope.
+on vendor HTTPS endpoints or reviewed exact-byte China mirrors; GitHub Releases
+contains only the signed manifest and its detached signature envelope.
 
 ## Current Production State
 
 - The first production manifest exists at `release/runtime-manifest.json`. It
   pins the managed Flutter, JDK, Android SDK, Go, Node.js, and MySQL artifacts,
-  including their official HTTPS sources and SHA-256 digests.
+  including official HTTPS sources, reviewed mirror fallbacks where available,
+  and SHA-256 digests.
 - The production key ID is `nishi-release-2026-01`. Its public key is embedded
   in `RemoteManifestReleaseConfiguration`, so normal release builds do not need
   signing-key `dart-define` values. The defines remain available for staging or
@@ -29,9 +30,13 @@ only the signed manifest and its detached signature envelope.
 - Ed25519 authenticates the exact bytes of `runtime-manifest.json`.
 - Every vendor artifact in the manifest has an expected SHA-256 digest. The app
   verifies that digest after download and before installation.
-- A signature does not make an untrusted artifact safe. Only use official vendor
-  HTTPS URLs, confirm the vendor's published checksum when available, and review
-  every manifest change before signing it.
+- The official source is always attempted first. Network, HTTP, timeout, or
+  integrity failure may advance to a signed mirror URL. Partial data is deleted
+  before changing sources, and every source must match the same SHA-256.
+- A signature does not make an untrusted artifact safe. Use official vendor
+  HTTPS URLs and exact-byte mirrors operated by the vendor or a reviewed mirror
+  provider. Fully download every mirror candidate, compare it with the canonical
+  SHA-256, and review every manifest change before signing it.
 - The private Ed25519 key is generated and stored in an access-restricted
   location outside this repository and outside CI. Never commit it, embed it in
   the application, or add it to GitHub Actions or GitHub Secrets. Keep an
@@ -75,9 +80,11 @@ is deliberately performed outside GitHub Actions.
 
 ## Prepare and Sign a Manifest
 
-Use official stable vendor URLs for each supported host and architecture. Record
-the SHA-256 digest of the exact file served at each URL. Keep the manifest bytes
-unchanged after signing; even whitespace changes invalidate the signature.
+Use official stable vendor URLs for each supported host and architecture. A
+`mirrorUrls` entry is optional and may be added only after a full HTTPS download
+matches the official artifact SHA-256. Record the digest and verification
+evidence. Keep the manifest bytes unchanged after signing; even whitespace
+changes invalidate the signature.
 
 Sign the reviewed manifest on the trusted signing workstation:
 

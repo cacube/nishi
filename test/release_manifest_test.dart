@@ -54,4 +54,44 @@ void main() {
       }
     }
   });
+
+  test('production manifest contains only verified mirror coverage', () async {
+    final manifest = const RuntimeManifestLoader().decode(
+      await File('release/runtime-manifest.json').readAsString(),
+    );
+
+    for (final componentId in const [
+      'jdk',
+      'android-sdk',
+      'flutter',
+      'go',
+      'node',
+    ]) {
+      final component = manifest.componentById(componentId)!;
+      for (final artifact in component.artifacts) {
+        expect(
+          artifact.mirrorUrls,
+          isNotEmpty,
+          reason:
+              '$componentId ${artifact.targetKey} requires a verified mirror',
+        );
+      }
+    }
+
+    expect(
+      manifest.componentById('android-sdk')!.androidSdk!.repositoryMirrorUrls,
+      [Uri.parse('https://googledownloads.cn/android/repository/')],
+    );
+    expect(
+      manifest.componentById('mysql')!.artifacts,
+      everyElement(
+        isA<RuntimeArtifact>().having(
+          (artifact) => artifact.mirrorUrls,
+          'mirror URLs',
+          isEmpty,
+        ),
+      ),
+      reason: 'MySQL 8.4.10 has no verified exact-byte China mirror',
+    );
+  });
 }

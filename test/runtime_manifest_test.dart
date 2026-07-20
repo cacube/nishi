@@ -22,6 +22,13 @@ void main() {
     expect(mysql.artifacts.single.archiveType, RuntimeArchiveType.zip);
     expect(mysql.artifacts.single.archiveRoot, 'mysql-test');
     expect(mysql.artifacts.single.installSubdirectory, 'runtime');
+    expect(mysql.artifacts.single.mirrorUrls, [
+      Uri.parse('https://mirror.example.invalid/non-production/mysql.zip'),
+    ]);
+    expect(mysql.artifacts.single.downloadUrls, [
+      Uri.parse('https://downloads.example.invalid/non-production/mysql.zip'),
+      Uri.parse('https://mirror.example.invalid/non-production/mysql.zip'),
+    ]);
     expect(mysql.service?.defaultPort, 3306);
     expect(mysql.service?.startAutomatically, isTrue);
     expect(mysql.executables.single.path, r'bin\mysql.exe');
@@ -50,6 +57,10 @@ void main() {
       () => manifest.components.first.executables.first.architectures.clear(),
       throwsUnsupportedError,
     );
+    expect(
+      () => manifest.components.first.artifacts.first.mirrorUrls.clear(),
+      throwsUnsupportedError,
+    );
   });
 
   test('reports semantic errors with JSON paths', () {
@@ -64,9 +75,9 @@ void main() {
     artifact['sha256'] = 'not-a-production-checksum';
     artifact['archiveRoot'] = '../outside';
     artifact['installSubdirectory'] = '../runtime';
-    artifacts.add(Map<String, String>.from(artifact));
+    mysql['artifacts'] = [...artifacts, Map<String, Object?>.from(artifact)];
     mysql['dependencies'] = ['missing-component'];
-    jdk['artifacts'] = [Map<String, String>.from(artifact)];
+    jdk['artifacts'] = [Map<String, Object?>.from(artifact)];
 
     expect(
       () => loader.fromJson(fixture),
@@ -136,6 +147,70 @@ void main() {
     );
   });
 
+  test('accepts a missing mirrorUrls field for old manifests', () {
+    final fixture = _validTestFixture();
+    final components = fixture['components']! as List<Object?>;
+    final mysql = components.first! as Map<String, Object?>;
+    final artifacts = mysql['artifacts']! as List<Object?>;
+    final artifact = artifacts.first! as Map<String, Object?>;
+    artifact.remove('mirrorUrls');
+
+    final loaded = loader.fromJson(fixture);
+
+    expect(loaded.componentById('mysql')!.artifacts.single.mirrorUrls, isEmpty);
+  });
+
+  test('rejects a non-array mirrorUrls field', () {
+    final fixture = _validTestFixture();
+    final components = fixture['components']! as List<Object?>;
+    final mysql = components.first! as Map<String, Object?>;
+    final artifacts = mysql['artifacts']! as List<Object?>;
+    final artifact = artifacts.first! as Map<String, Object?>;
+    artifact['mirrorUrls'] = 'not-an-array';
+
+    expect(
+      () => loader.fromJson(fixture),
+      throwsA(
+        isA<RuntimeManifestValidationException>().having(
+          (error) => error.errors.map((item) => item.path),
+          'error paths',
+          contains(r'$.components[0].artifacts[0].mirrorUrls'),
+        ),
+      ),
+    );
+  });
+
+  test('rejects insecure and duplicate mirror URLs', () {
+    final fixture = _validTestFixture();
+    final components = fixture['components']! as List<Object?>;
+    final mysql = components.first! as Map<String, Object?>;
+    final artifacts = mysql['artifacts']! as List<Object?>;
+    final artifact = artifacts.first! as Map<String, Object?>;
+    artifact['mirrorUrls'] = [
+      artifact['officialUrl'],
+      'http://mirror.example.invalid/mysql.zip',
+      'https://user@mirror.example.invalid/mysql.zip#fragment',
+      'https://mirror.example.invalid/mysql.zip',
+      'https://mirror.example.invalid/mysql.zip',
+    ];
+
+    expect(
+      () => loader.fromJson(fixture),
+      throwsA(
+        isA<RuntimeManifestValidationException>().having(
+          (error) => error.errors.map((item) => item.path),
+          'error paths',
+          containsAll([
+            r'$.components[0].artifacts[0].mirrorUrls[0]',
+            r'$.components[0].artifacts[0].mirrorUrls[1]',
+            r'$.components[0].artifacts[0].mirrorUrls[2]',
+            r'$.components[0].artifacts[0].mirrorUrls[4]',
+          ]),
+        ),
+      ),
+    );
+  });
+
   test('loads and validates Android SDK package and license metadata', () {
     final fixture = _validTestFixture();
     final components = fixture['components']! as List<Object?>;
@@ -148,6 +223,9 @@ void main() {
       'platform-tools',
       'platforms;android-36',
       'build-tools;36.0.0',
+    ]);
+    expect(android.repositoryMirrorUrls, [
+      Uri.parse('https://googledownloads.example.invalid/android/repository/'),
     ]);
     expect(android.license.id, 'android-sdk-license');
     expect(
@@ -162,6 +240,11 @@ void main() {
     final android = _androidSdkFixture();
     final metadata = android['androidSdk']! as Map<String, Object?>;
     metadata['packages'] = ['platform-tools', 'platform-tools', 'bad\npackage'];
+    metadata['repositoryMirrorUrls'] = [
+      'https://dl.google.com/android/repository/',
+      'http://mirror.example.invalid/android/repository/',
+      'https://mirror.example.invalid/android/repository',
+    ];
     final license = metadata['license']! as Map<String, Object?>;
     license['url'] = 'http://example.invalid/license';
     fixture['components'] = [...components, android];
@@ -175,6 +258,9 @@ void main() {
           containsAll([
             r'$.components[2].androidSdk.packages[1]',
             r'$.components[2].androidSdk.packages[2]',
+            r'$.components[2].androidSdk.repositoryMirrorUrls[0]',
+            r'$.components[2].androidSdk.repositoryMirrorUrls[1]',
+            r'$.components[2].androidSdk.repositoryMirrorUrls[2]',
             r'$.components[2].androidSdk.license.url',
           ]),
         ),
@@ -214,6 +300,9 @@ Map<String, Object?> _androidSdkFixture() {
         'platforms;android-36',
         'build-tools;36.0.0',
       ],
+      'repositoryMirrorUrls': [
+        'https://googledownloads.example.invalid/android/repository/',
+      ],
       'license': {
         'id': 'android-sdk-license',
         'displayName': 'Android SDK License Agreement',
@@ -241,6 +330,9 @@ Map<String, Object?> _validTestFixture() {
             'architecture': 'x64',
             'officialUrl':
                 'https://downloads.example.invalid/non-production/mysql.zip',
+            'mirrorUrls': [
+              'https://mirror.example.invalid/non-production/mysql.zip',
+            ],
             'sha256': 'a' * 64,
             'archiveType': 'zip',
             'archiveRoot': 'mysql-test',

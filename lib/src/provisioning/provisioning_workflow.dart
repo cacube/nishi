@@ -80,6 +80,7 @@ final class ProvisioningWorkflow {
                 .path,
             jdkRoot: _layout.componentVersion(jdk.id, jdk.version).path,
             packages: androidSdk.packages,
+            repositoryMirrorUrls: androidSdk.repositoryMirrorUrls,
             isWindows: artifact.platform == RuntimePlatform.windows,
           );
         }

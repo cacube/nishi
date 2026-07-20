@@ -136,23 +136,28 @@ class RuntimeManifestValidator {
           ),
         );
       }
-      if (artifact.officialUrl.scheme != 'https' ||
-          artifact.officialUrl.host.isEmpty) {
-        errors.add(
-          RuntimeManifestValidationError(
-            '$artifactPath.officialUrl',
-            'must be an absolute HTTPS URL',
-          ),
-        );
-      }
-      if (artifact.officialUrl.hasFragment ||
-          artifact.officialUrl.userInfo.isNotEmpty) {
-        errors.add(
-          RuntimeManifestValidationError(
-            '$artifactPath.officialUrl',
-            'must not contain credentials or a fragment',
-          ),
-        );
+      _validateDownloadUrl(
+        artifact.officialUrl,
+        '$artifactPath.officialUrl',
+        errors,
+      );
+      final downloadUrls = <Uri>{artifact.officialUrl};
+      for (
+        var mirrorIndex = 0;
+        mirrorIndex < artifact.mirrorUrls.length;
+        mirrorIndex++
+      ) {
+        final mirror = artifact.mirrorUrls[mirrorIndex];
+        final mirrorPath = '$artifactPath.mirrorUrls[$mirrorIndex]';
+        _validateDownloadUrl(mirror, mirrorPath, errors);
+        if (!downloadUrls.add(mirror)) {
+          errors.add(
+            RuntimeManifestValidationError(
+              mirrorPath,
+              'duplicates another download URL for this artifact',
+            ),
+          );
+        }
       }
       if (!_sha256Pattern.hasMatch(artifact.sha256)) {
         errors.add(
@@ -340,6 +345,32 @@ class RuntimeManifestValidator {
           ),
         );
       }
+      final repositoryMirrors = <Uri>{_androidOfficialRepositoryUrl};
+      for (
+        var index = 0;
+        index < androidSdk.repositoryMirrorUrls.length;
+        index++
+      ) {
+        final mirror = androidSdk.repositoryMirrorUrls[index];
+        final mirrorPath = '$metadataPath.repositoryMirrorUrls[$index]';
+        _validateDownloadUrl(mirror, mirrorPath, errors);
+        if (mirror.query.isNotEmpty || !mirror.path.endsWith('/')) {
+          errors.add(
+            RuntimeManifestValidationError(
+              mirrorPath,
+              'must be a repository base URL ending in / without a query',
+            ),
+          );
+        }
+        if (!repositoryMirrors.add(mirror)) {
+          errors.add(
+            RuntimeManifestValidationError(
+              mirrorPath,
+              'duplicates another Android repository mirror URL',
+            ),
+          );
+        }
+      }
       final license = androidSdk.license;
       if (!_componentIdPattern.hasMatch(license.id)) {
         errors.add(
@@ -365,6 +396,30 @@ class RuntimeManifestValidator {
           ),
         );
       }
+    }
+  }
+
+  static final Uri _androidOfficialRepositoryUrl = Uri.parse(
+    'https://dl.google.com/android/repository/',
+  );
+
+  void _validateDownloadUrl(
+    Uri url,
+    String path,
+    List<RuntimeManifestValidationError> errors,
+  ) {
+    if (url.scheme != 'https' || url.host.isEmpty) {
+      errors.add(
+        RuntimeManifestValidationError(path, 'must be an absolute HTTPS URL'),
+      );
+    }
+    if (url.hasFragment || url.userInfo.isNotEmpty) {
+      errors.add(
+        RuntimeManifestValidationError(
+          path,
+          'must not contain credentials or a fragment',
+        ),
+      );
     }
   }
 

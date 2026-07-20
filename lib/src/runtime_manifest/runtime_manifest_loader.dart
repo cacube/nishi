@@ -95,6 +95,7 @@ class _ManifestReader {
 
   RuntimeArtifact _readArtifact(Map<String, Object?> json, String path) {
     final urlText = _requiredString(json, 'officialUrl', path) ?? '';
+    final mirrorUrlTexts = _optionalStringList(json, 'mirrorUrls', path);
     return RuntimeArtifact(
       platform: _enumValue(
         json,
@@ -111,6 +112,9 @@ class _ManifestReader {
         (value) => value.jsonValue,
       ),
       officialUrl: Uri.tryParse(urlText) ?? Uri(),
+      mirrorUrls: mirrorUrlTexts
+          .map((value) => Uri.tryParse(value) ?? Uri())
+          .toList(),
       sha256: _requiredString(json, 'sha256', path) ?? '',
       archiveType: _enumValue(
         json,
@@ -163,6 +167,11 @@ class _ManifestReader {
     final license = _optionalObject(json, 'license', path);
     return RuntimeAndroidSdkMetadata(
       packages: _stringList(json, 'packages', path),
+      repositoryMirrorUrls: _optionalStringList(
+        json,
+        'repositoryMirrorUrls',
+        path,
+      ).map((value) => Uri.tryParse(value) ?? Uri()).toList(),
       license: license == null
           ? RuntimeLicenseMetadata(id: '', displayName: '', url: Uri())
           : _readLicense(license, '$path.license'),
@@ -277,6 +286,15 @@ class _ManifestReader {
       }
     }
     return result;
+  }
+
+  List<String> _optionalStringList(
+    Map<String, Object?> json,
+    String key,
+    String path,
+  ) {
+    if (!json.containsKey(key)) return const [];
+    return _stringList(json, key, path);
   }
 
   T _enumValue<T>(

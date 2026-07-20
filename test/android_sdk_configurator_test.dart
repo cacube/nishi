@@ -66,6 +66,7 @@ void main() {
       'JAVA_HOME': '/managed/jdk',
       'ANDROID_HOME': '/managed/android-sdk',
       'ANDROID_SDK_ROOT': '/managed/android-sdk',
+      'SDK_TEST_BASE_URL': 'https://dl.google.com/android/repository/',
     });
     expect(licenseProcess.stdinText, contains('y\n'));
     expect(licenseProcess.stdinClosed, isTrue);
@@ -174,6 +175,99 @@ void main() {
             ),
       ),
     );
+  });
+
+  test(
+    'selects a reachable repository mirror before running sdkmanager',
+    () async {
+      final processes = _RecordingProcessStarter([
+        _CompletedProcess(),
+        _CompletedProcess(stdoutText: 'packages installed from mirror'),
+      ]);
+      final progress = <AndroidSdkConfigurationProgress>[];
+      final configurator = AndroidSdkConfigurator(
+        sdkRoot: '/managed/android-sdk',
+        jdkRoot: '/managed/jdk',
+        packages: const ['platform-tools'],
+        repositoryMirrorUrls: [
+          Uri.parse('https://googledownloads.cn/android/repository/'),
+        ],
+        repositoryProbe: (url) async => url.host == 'googledownloads.cn',
+        processStarter: processes,
+        isWindows: false,
+      );
+
+      await configurator.configure(
+        licensesAccepted: true,
+        onProgress: progress.add,
+      );
+
+      expect(processes.requests, hasLength(2));
+      expect(
+        processes.requests[1].environment['SDK_TEST_BASE_URL'],
+        'https://googledownloads.cn/android/repository/',
+      );
+      expect(
+        progress.map((item) => item.message),
+        contains('官网连接失败，正在切换 Android 国内镜像'),
+      );
+    },
+  );
+
+  test('does not retry a non-network sdkmanager failure', () async {
+    final processes = _RecordingProcessStarter([
+      _CompletedProcess(),
+      _CompletedProcess(exitCodeValue: 1, stderrText: 'package not found'),
+    ]);
+    final configurator = AndroidSdkConfigurator(
+      sdkRoot: '/managed/android-sdk',
+      jdkRoot: '/managed/jdk',
+      packages: const ['missing-package'],
+      repositoryMirrorUrls: [
+        Uri.parse('https://googledownloads.cn/android/repository/'),
+      ],
+      repositoryProbe: (_) async => true,
+      processStarter: processes,
+      isWindows: false,
+    );
+
+    await expectLater(
+      configurator.configure(licensesAccepted: true),
+      throwsA(isA<AndroidSdkConfigurationException>()),
+    );
+
+    expect(processes.requests, hasLength(2));
+  });
+
+  test('times out and kills a stalled sdkmanager process', () async {
+    final stalledProcess = _BlockingProcess();
+    final processes = _RecordingProcessStarter([stalledProcess]);
+    final configurator = AndroidSdkConfigurator(
+      sdkRoot: '/managed/android-sdk',
+      jdkRoot: '/managed/jdk',
+      packages: const ['platform-tools'],
+      repositoryMirrorUrls: [
+        Uri.parse('https://googledownloads.cn/android/repository/'),
+      ],
+      repositoryProbe: (url) async => url.host == 'googledownloads.cn',
+      processStarter: processes,
+      processTimeout: const Duration(milliseconds: 10),
+      isWindows: false,
+    );
+
+    await expectLater(
+      configurator.configure(licensesAccepted: true),
+      throwsA(
+        isA<AndroidSdkConfigurationException>().having(
+          (error) => error.exitCode,
+          'exitCode',
+          -1,
+        ),
+      ),
+    );
+
+    expect(stalledProcess.killed, isTrue);
+    expect(processes.requests, hasLength(1));
   });
 
   test('cancellation kills sdkmanager and stops the configuration', () async {

@@ -71,6 +71,23 @@ void main() {
     expect(find.text('下载源'), findsOneWidget);
     expect(find.text('缓存与存储'), findsOneWidget);
 
+    for (final element in find.byType(ListTile).evaluate()) {
+      var foundMaterial = false;
+      var foundDecoratedBoxBeforeMaterial = false;
+      element.visitAncestorElements((ancestor) {
+        if (ancestor.widget is Material) {
+          foundMaterial = true;
+          return false;
+        }
+        if (ancestor.widget is DecoratedBox) {
+          foundDecoratedBoxBeforeMaterial = true;
+        }
+        return true;
+      });
+      expect(foundMaterial, isTrue);
+      expect(foundDecoratedBoxBeforeMaterial, isFalse);
+    }
+
     await tester.tap(find.text('国内优先'));
     await tester.pumpAndSettle();
     expect(
@@ -119,6 +136,7 @@ void main() {
 
     expect(find.text('需要许可确认'), findsOneWidget);
     expect(find.text('同意并继续'), findsOneWidget);
+    expect(find.text('取消'), findsOneWidget);
     expect(actionRuns, 0);
     var foundMaterial = false;
     var foundDecoratedBoxBeforeMaterial = false;

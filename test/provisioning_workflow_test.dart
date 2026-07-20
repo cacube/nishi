@@ -60,6 +60,11 @@ void main() {
     );
     await layout.ensureCreated();
     await layout.recordActiveVersion('git', '1.0.0');
+    final executable = File(
+      '${layout.componentVersion('git', '1.0.0').path}/bin/git',
+    );
+    await executable.parent.create(recursive: true);
+    await executable.writeAsString('managed git');
     final downloads = DownloadManager();
     addTearDown(() => downloads.close(force: true));
     final workflow = ProvisioningWorkflow(

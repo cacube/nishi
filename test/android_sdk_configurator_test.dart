@@ -245,6 +245,32 @@ void main() {
     );
   });
 
+  test('probes an official-only repository selected by policy', () async {
+    var probes = 0;
+    final configurator = AndroidSdkConfigurator(
+      sdkRoot: '/managed/android-sdk',
+      jdkRoot: '/managed/jdk',
+      packages: const ['platform-tools'],
+      repositoryMirrorUrls: [
+        Uri.parse('https://googledownloads.cn/android/repository/'),
+      ],
+      repositorySourceOrderer: (sources) => [sources.first],
+      repositoryProbe: (_) async {
+        probes += 1;
+        return false;
+      },
+      processStarter: _RecordingProcessStarter(const []),
+      isWindows: false,
+    );
+
+    await expectLater(
+      configurator.configure(licensesAccepted: true),
+      throwsA(isA<AndroidSdkConfigurationException>()),
+    );
+
+    expect(probes, 1);
+  });
+
   test('does not retry a non-network sdkmanager failure', () async {
     final processes = _RecordingProcessStarter([
       _CompletedProcess(),

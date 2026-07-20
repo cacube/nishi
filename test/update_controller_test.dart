@@ -74,6 +74,25 @@ void main() {
     expect(controller.state.availableUpdates, isEmpty);
   });
 
+  test('treats a stale active-version receipt as not installed', () async {
+    final controller = UpdateController(
+      manifestSource: () async => RuntimeManifest(
+        schemaVersion: 1,
+        components: [_component('flutter', '3.44.6')],
+      ),
+      readActiveVersions: () async => {'flutter': '3.44.6'},
+      validateActiveVersion: (_, _) async => false,
+      target: target,
+    );
+
+    await controller.check();
+
+    expect(
+      controller.state.entryById('flutter')!.status,
+      RuntimeUpdateStatus.notInstalled,
+    );
+  });
+
   test(
     'downloads available signed artifacts without installing them',
     () async {

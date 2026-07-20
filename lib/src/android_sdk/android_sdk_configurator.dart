@@ -234,7 +234,9 @@ final class AndroidSdkConfigurator {
     if (repositoryUrls.isEmpty) {
       throw StateError('Android SDK repository source list is empty');
     }
-    if (repositoryUrls.length == 1) return repositoryUrls.single;
+    if (repositoryUrls.length == 1 && _repositorySourceOrderer == null) {
+      return repositoryUrls.single;
+    }
     for (var index = 0; index < repositoryUrls.length; index++) {
       if (await _repositoryProbe(repositoryUrls[index])) {
         return repositoryUrls[index];

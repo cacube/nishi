@@ -6,7 +6,9 @@ import '../environment/environment_scanner.dart';
 import '../install/artifact_installer.dart';
 import '../manifest_security/remote_manifest_release_configuration.dart';
 import '../operation/runtime_operation_coordinator.dart';
+import '../provisioning/managed_runtime_health.dart';
 import '../provisioning/provisioning_workflow.dart';
+import '../provisioning/runtime_target.dart';
 import '../runtime_manifest/runtime_manifest.dart';
 import '../setup/license_acceptance.dart';
 import '../settings/settings.dart';
@@ -43,6 +45,10 @@ final class SetupComposition {
           manifestSource: () async =>
               RuntimeManifest(schemaVersion: 1, components: const []),
           readActiveVersions: () async => const {},
+          target: const RuntimeTarget(
+            platform: RuntimePlatform.macos,
+            architecture: RuntimeArchitecture.arm64,
+          ),
         );
     return SetupComposition._(
       environment: environment,
@@ -57,6 +63,7 @@ final class SetupComposition {
   factory SetupComposition.forCurrentUser() {
     final layout = RuntimeLayout.forCurrentUser();
     final operations = RuntimeOperationCoordinator();
+    final target = RuntimeTarget.current();
     final environment = EnvironmentController(
       scanner: EnvironmentScanner(layout: layout),
     );
@@ -80,6 +87,7 @@ final class SetupComposition {
       installer: ArtifactInstaller(layout: layout),
       licenseAcceptance: licenses,
       sourceOrderer: settings.orderDownloadSources,
+      target: target,
     );
     final releaseConfiguration =
         RemoteManifestReleaseConfiguration.fromEnvironment();
@@ -111,8 +119,16 @@ final class SetupComposition {
         layout: layout,
         downloads: downloads,
         readActiveVersions: layout.readActiveVersions,
+        target: target,
       ),
       operations: operations,
+      target: target,
+      validateActiveVersion: (component, version) => managedRuntimeIsUsable(
+        layout: layout,
+        component: component,
+        version: version,
+        target: target,
+      ),
     );
     return SetupComposition._(
       environment: environment,

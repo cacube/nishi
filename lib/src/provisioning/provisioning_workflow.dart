@@ -16,6 +16,7 @@ import '../setup/setup_orchestrator.dart';
 import '../setup/setup_task.dart';
 import '../storage/runtime_layout.dart';
 import 'provisioning_plan.dart';
+import 'managed_runtime_health.dart';
 import 'runtime_provisioning_action.dart';
 import 'runtime_target.dart';
 
@@ -81,7 +82,13 @@ final class ProvisioningWorkflow {
       );
       final artifact = entry.artifact;
       if (artifact != null) {
-        if (activeVersions[component.id] == component.version) {
+        if (activeVersions[component.id] == component.version &&
+            await managedRuntimeIsUsable(
+              layout: _layout,
+              component: component,
+              version: component.version,
+              target: _target,
+            )) {
           actions[component.id] = const _AlreadyInstalledAction();
           continue;
         }

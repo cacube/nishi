@@ -11,17 +11,21 @@ import 'update_downloader.dart';
 
 typedef UpdateManifestSource = Future<RuntimeManifest> Function();
 typedef ActiveVersionsReader = Future<Map<String, String>> Function();
+typedef ActiveVersionValidator =
+    Future<bool> Function(RuntimeComponent component, String version);
 
 final class UpdateController extends ChangeNotifier {
   UpdateController({
     required UpdateManifestSource manifestSource,
     required ActiveVersionsReader readActiveVersions,
+    ActiveVersionValidator? validateActiveVersion,
     UpdateArtifactDownloader? artifactDownloader,
     RuntimeOperationCoordinator? operations,
     RuntimeTarget? target,
     DateTime Function()? clock,
   }) : _manifestSource = manifestSource,
        _readActiveVersions = readActiveVersions,
+       _validateActiveVersion = validateActiveVersion,
        _artifactDownloader = artifactDownloader,
        _operations = operations,
        _target = target ?? RuntimeTarget.current(),
@@ -29,6 +33,7 @@ final class UpdateController extends ChangeNotifier {
 
   final UpdateManifestSource _manifestSource;
   final ActiveVersionsReader _readActiveVersions;
+  final ActiveVersionValidator? _validateActiveVersion;
   final UpdateArtifactDownloader? _artifactDownloader;
   final RuntimeOperationCoordinator? _operations;
   final RuntimeTarget _target;
@@ -43,14 +48,19 @@ final class UpdateController extends ChangeNotifier {
     notifyListeners();
     try {
       final manifest = await _manifestSource();
-      _manifest = manifest;
       final activeVersions = await _readActiveVersions();
       final plan = ProvisioningPlan.fromManifest(manifest, _target);
       final entries = <RuntimeUpdateEntry>[];
       for (final planEntry in plan.entries) {
         final component = planEntry.component;
         if (!component.isManaged) continue;
-        final currentVersion = activeVersions[component.id];
+        var currentVersion = activeVersions[component.id];
+        final validator = _validateActiveVersion;
+        if (currentVersion != null &&
+            validator != null &&
+            !await validator(component, currentVersion)) {
+          currentVersion = null;
+        }
         final status = _statusFor(currentVersion, component.version);
         entries.add(
           RuntimeUpdateEntry(
@@ -68,6 +78,7 @@ final class UpdateController extends ChangeNotifier {
         lastCheckedAt: _clock(),
         clearError: true,
       );
+      _manifest = manifest;
     } on Object {
       state = state.copyWith(
         checking: false,

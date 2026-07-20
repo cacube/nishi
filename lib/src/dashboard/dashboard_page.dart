@@ -819,32 +819,34 @@ class _SettingsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFE1E4DF)),
+    return Material(
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        side: const BorderSide(color: Color(0xFFE1E4DF)),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 19, color: const Color(0xFF176B5B)),
-              const SizedBox(width: 9),
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 19, color: const Color(0xFF176B5B)),
+                const SizedBox(width: 9),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          ...children,
-        ],
+              ],
+            ),
+            const SizedBox(height: 10),
+            ...children,
+          ],
+        ),
       ),
     );
   }
@@ -1058,7 +1060,11 @@ class _SetupCommand extends StatelessWidget {
         label: const Text('重试失败项'),
       ),
       SetupUiPhase.awaitingPreflight ||
-      SetupUiPhase.awaitingUser => const SizedBox(width: 120),
+      SetupUiPhase.awaitingUser => OutlinedButton.icon(
+        onPressed: setup.cancel,
+        icon: const Icon(Icons.close),
+        label: const Text('取消'),
+      ),
       _ => FilledButton.icon(
         onPressed: runtimeBusy ? null : (ready ? onOpenUpdates : setup.start),
         icon: Icon(ready ? Icons.system_update_alt : Icons.download),

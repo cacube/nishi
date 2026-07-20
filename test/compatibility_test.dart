@@ -29,6 +29,19 @@ void main() {
         isTrue,
       );
     });
+
+    test('compares JDK build identifiers', () {
+      expect(
+        SoftwareVersion.parse('17.0.19+11') >
+            SoftwareVersion.parse('17.0.19+10'),
+        isTrue,
+      );
+      expect(
+        SoftwareVersion.parse('17.0.20+1') >
+            SoftwareVersion.parse('17.0.19+10'),
+        isTrue,
+      );
+    });
   });
 
   group('VersionOutputParser', () {

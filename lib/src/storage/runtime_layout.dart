@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 enum HostOperatingSystem { windows, macos }
@@ -52,6 +53,64 @@ final class RuntimeLayout {
       data.create(recursive: true),
       logs.create(recursive: true),
     ]);
+  }
+
+  Future<Map<String, String>> readActiveVersions() async {
+    if (!await activeVersions.exists()) return const {};
+    return _decodeActiveVersions(await activeVersions.readAsString());
+  }
+
+  Map<String, String> readActiveVersionsSync() {
+    if (!activeVersions.existsSync()) return const {};
+    return _decodeActiveVersions(activeVersions.readAsStringSync());
+  }
+
+  Map<String, String> _decodeActiveVersions(String source) {
+    final decoded = jsonDecode(source);
+    if (decoded is! Map<String, Object?>) {
+      throw const FormatException('active-versions.json must be an object');
+    }
+    final result = <String, String>{};
+    for (final entry in decoded.entries) {
+      if (entry.value is! String) {
+        throw FormatException(
+          'active version for ${entry.key} must be a string',
+        );
+      }
+      result[entry.key] = entry.value! as String;
+    }
+    return Map.unmodifiable(result);
+  }
+
+  Future<void> recordActiveVersion(String componentId, String version) async {
+    _validateSegment(componentId, 'componentId');
+    _validateSegment(version, 'version');
+    await root.create(recursive: true);
+    final versions = Map<String, String>.from(await readActiveVersions());
+    versions[componentId] = version;
+    final ordered = Map.fromEntries(
+      versions.entries.toList()
+        ..sort((left, right) => left.key.compareTo(right.key)),
+    );
+    final temporary = File('${activeVersions.path}.tmp');
+    final backup = File('${activeVersions.path}.backup');
+    if (await temporary.exists()) await temporary.delete();
+    if (await backup.exists()) await backup.delete();
+    await temporary.writeAsString('${jsonEncode(ordered)}\n', flush: true);
+    final hadExisting = await activeVersions.exists();
+    if (hadExisting) await activeVersions.rename(backup.path);
+    try {
+      await temporary.rename(activeVersions.path);
+      if (await backup.exists()) await backup.delete();
+    } on Object {
+      if (await temporary.exists()) await temporary.delete();
+      if (hadExisting &&
+          await backup.exists() &&
+          !await activeVersions.exists()) {
+        await backup.rename(activeVersions.path);
+      }
+      rethrow;
+    }
   }
 
   static String _windowsRoot(Map<String, String> environment) {

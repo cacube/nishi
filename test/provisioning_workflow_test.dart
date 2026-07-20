@@ -29,6 +29,7 @@ void main() {
           platform: RuntimePlatform.macos,
           architecture: RuntimeArchitecture.arm64,
         ),
+        activateHostEnvironment: false,
       );
 
       final orchestrator = await workflow.prepare(() async {
@@ -49,6 +50,39 @@ void main() {
       expect(orchestrator.tasks.first.status, SetupTaskStatus.pending);
     },
   );
+
+  test('skips downloading a managed component at the active version', () async {
+    final directory = await Directory.systemTemp.createTemp('workflow_active_');
+    addTearDown(() => directory.delete(recursive: true));
+    final layout = RuntimeLayout.forCurrentUser(
+      environment: {'HOME': directory.path},
+      operatingSystem: HostOperatingSystem.macos,
+    );
+    await layout.ensureCreated();
+    await layout.recordActiveVersion('git', '1.0.0');
+    final downloads = DownloadManager();
+    addTearDown(() => downloads.close(force: true));
+    final workflow = ProvisioningWorkflow(
+      layout: layout,
+      downloads: downloads,
+      installer: ArtifactInstaller(layout: layout),
+      target: const RuntimeTarget(
+        platform: RuntimePlatform.macos,
+        architecture: RuntimeArchitecture.arm64,
+      ),
+      activateHostEnvironment: false,
+    );
+
+    final orchestrator = await workflow.prepare(
+      () async =>
+          RuntimeManifest(schemaVersion: 1, components: [_component('git')]),
+    );
+    await orchestrator.run();
+
+    expect(orchestrator.completed, isTrue);
+    expect(orchestrator.tasks.single.status, SetupTaskStatus.succeeded);
+    expect(orchestrator.tasks.single.message, '已是最新版本');
+  });
 }
 
 RuntimeComponent _component(

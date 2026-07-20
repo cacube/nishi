@@ -7,10 +7,14 @@ import '../compatibility/compatibility_requirement.dart';
 import '../compatibility/service_probe.dart';
 import '../compatibility/software_version.dart';
 import '../compatibility/version_output_parser.dart';
+import '../storage/runtime_layout.dart';
 import 'environment_component.dart';
 
 class EnvironmentScanner {
-  const EnvironmentScanner();
+  const EnvironmentScanner({this.layout, this.baseEnvironment});
+
+  final RuntimeLayout? layout;
+  final Map<String, String>? baseEnvironment;
 
   Future<List<EnvironmentComponent>> scan() async {
     final definitions = _definitions();
@@ -57,7 +61,13 @@ class EnvironmentScanner {
         Icons.inventory_2_outlined,
       ),
       _component('mysql', 'MySQL', ComponentGroup.services, Icons.storage),
-      _component('redis', 'Redis', ComponentGroup.services, Icons.memory),
+      _component(
+        'redis',
+        'Redis',
+        ComponentGroup.services,
+        Icons.memory,
+        required: false,
+      ),
       _component(
         'git',
         'Git',
@@ -147,7 +157,7 @@ class EnvironmentScanner {
     final result = await Process.run(
       executable,
       arguments,
-      environment: _environment,
+      environment: commandEnvironment(),
       runInShell: Platform.isWindows,
     ).timeout(const Duration(seconds: 8));
     if (result.exitCode != 0) return _missing(component);
@@ -372,11 +382,12 @@ class EnvironmentScanner {
         .firstWhere((line) => line.isNotEmpty, orElse: () => '已安装');
   }
 
-  Map<String, String> get _environment {
-    final home = Platform.environment['HOME'] ?? '';
-    final existing = Platform.environment['PATH'] ?? '';
+  Map<String, String> commandEnvironment() {
+    final inherited = baseEnvironment ?? Platform.environment;
+    final home = inherited['HOME'] ?? '';
+    final existing = inherited['PATH'] ?? '';
     final separator = Platform.isWindows ? ';' : ':';
-    final extras = Platform.isWindows
+    final fallbackExtras = Platform.isWindows
         ? <String>[]
         : [
             '$home/sdk/flutter/bin',
@@ -386,12 +397,68 @@ class EnvironmentScanner {
             '/usr/bin',
             '/bin',
           ];
+    final variables = <String, String>{};
+    final managedExtras = <String>[];
+    final runtimeLayout = layout;
+    if (runtimeLayout != null) {
+      final versions = runtimeLayout.readActiveVersionsSync();
+      String? rootFor(String id) {
+        final version = versions[id];
+        return version == null
+            ? null
+            : runtimeLayout.componentVersion(id, version).path;
+      }
+
+      final flutterRoot = rootFor('flutter');
+      final jdkRoot = rootFor('jdk');
+      final androidRoot = rootFor('android-sdk');
+      final goRoot = rootFor('go');
+      final nodeRoot = rootFor('node');
+      final mysqlRoot = rootFor('mysql');
+      if (flutterRoot != null) {
+        variables['FLUTTER_ROOT'] = flutterRoot;
+        managedExtras.add(_joinPath(flutterRoot, 'bin'));
+      }
+      if (jdkRoot != null) {
+        variables['JAVA_HOME'] = jdkRoot;
+        managedExtras.add(_joinPath(jdkRoot, 'bin'));
+      }
+      if (androidRoot != null) {
+        variables['ANDROID_SDK_ROOT'] = androidRoot;
+        variables['ANDROID_HOME'] = androidRoot;
+        managedExtras.addAll([
+          _joinPath(androidRoot, 'platform-tools'),
+          _joinPath(androidRoot, 'cmdline-tools', 'latest', 'bin'),
+        ]);
+      }
+      if (goRoot != null) {
+        variables['GOROOT'] = goRoot;
+        managedExtras.add(_joinPath(goRoot, 'bin'));
+      }
+      if (nodeRoot != null) {
+        variables['NODE_HOME'] = nodeRoot;
+        managedExtras.add(
+          Platform.isWindows ? nodeRoot : _joinPath(nodeRoot, 'bin'),
+        );
+      }
+      if (mysqlRoot != null) {
+        variables['MYSQL_HOME'] = mysqlRoot;
+        managedExtras.add(_joinPath(mysqlRoot, 'bin'));
+      }
+    }
     return {
-      ...Platform.environment,
+      ...inherited,
+      ...variables,
       'PATH': [
-        ...extras,
+        ...managedExtras,
+        ...fallbackExtras,
         existing,
       ].where((path) => path.isNotEmpty).join(separator),
     };
   }
+}
+
+String _joinPath(String root, String first, [String? second, String? third]) {
+  final parts = [root, first, ?second, ?third];
+  return parts.join(Platform.pathSeparator);
 }

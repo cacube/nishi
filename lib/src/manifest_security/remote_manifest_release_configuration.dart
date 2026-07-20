@@ -39,6 +39,9 @@ final class RemoteManifestReleaseConfiguration {
   static const defaultSignatureUrl =
       'https://github.com/cacube/nishi/releases/latest/download/'
       'runtime-manifest.sig.json';
+  static const defaultSigningKeyId = 'nishi-release-2026-01';
+  static const defaultSigningPublicKeyBase64 =
+      'oGGZLXQMCkOFmfFbbyEd7S6ht5/f5zSm5qtK551FGis=';
 
   factory RemoteManifestReleaseConfiguration.fromEnvironment() {
     return RemoteManifestReleaseConfiguration.fromValues(
@@ -50,9 +53,13 @@ final class RemoteManifestReleaseConfiguration {
         signatureUrlEnvironmentKey,
         defaultValue: defaultSignatureUrl,
       ),
-      signingKeyId: const String.fromEnvironment(signingKeyIdEnvironmentKey),
+      signingKeyId: const String.fromEnvironment(
+        signingKeyIdEnvironmentKey,
+        defaultValue: defaultSigningKeyId,
+      ),
       signingPublicKeyBase64: const String.fromEnvironment(
         signingPublicKeyEnvironmentKey,
+        defaultValue: defaultSigningPublicKeyBase64,
       ),
     );
   }

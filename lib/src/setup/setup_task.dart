@@ -28,24 +28,31 @@ class SetupTaskState {
     this.status = SetupTaskStatus.pending,
     this.progress = 0,
     this.message,
+    this.userActionRequest,
   });
 
   final SetupTaskDefinition definition;
   final SetupTaskStatus status;
   final double progress;
   final String? message;
+  final Object? userActionRequest;
 
   SetupTaskState copyWith({
     SetupTaskStatus? status,
     double? progress,
     String? message,
     bool clearMessage = false,
+    Object? userActionRequest,
+    bool clearUserActionRequest = false,
   }) {
     return SetupTaskState(
       definition: definition,
       status: status ?? this.status,
       progress: progress ?? this.progress,
       message: clearMessage ? null : message ?? this.message,
+      userActionRequest: clearUserActionRequest
+          ? null
+          : userActionRequest ?? this.userActionRequest,
     );
   }
 }

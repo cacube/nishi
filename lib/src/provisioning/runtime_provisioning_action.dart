@@ -1,8 +1,16 @@
+import 'dart:io';
+
 import '../download/download_manager.dart';
 import '../install/artifact_installer.dart';
 import '../runtime_manifest/runtime_manifest.dart';
 import '../setup/setup_task.dart';
 import '../storage/runtime_layout.dart';
+
+typedef RuntimePostInstall =
+    Future<void> Function(
+      Directory activeDirectory,
+      SetupProgressCallback onProgress,
+    );
 
 final class RuntimeProvisioningAction implements CancellableSetupTaskAction {
   RuntimeProvisioningAction({
@@ -11,6 +19,8 @@ final class RuntimeProvisioningAction implements CancellableSetupTaskAction {
     required RuntimeLayout layout,
     required DownloadManager downloads,
     required ArtifactInstaller installer,
+    this.postInstall,
+    this.cancelPostInstall,
   }) : _layout = layout,
        _downloads = downloads,
        _installer = installer;
@@ -20,10 +30,15 @@ final class RuntimeProvisioningAction implements CancellableSetupTaskAction {
   final RuntimeLayout _layout;
   final DownloadManager _downloads;
   final ArtifactInstaller _installer;
+  final RuntimePostInstall? postInstall;
+  final void Function()? cancelPostInstall;
   DownloadCancellationToken? _cancellationToken;
 
   @override
-  void cancel() => _cancellationToken?.cancel();
+  void cancel() {
+    _cancellationToken?.cancel();
+    cancelPostInstall?.call();
+  }
 
   @override
   Future<void> execute(SetupProgressCallback onProgress) async {
@@ -55,6 +70,14 @@ final class RuntimeProvisioningAction implements CancellableSetupTaskAction {
           request: result.installerCommand,
         );
       }
+      final configure = postInstall;
+      if (configure != null) {
+        onProgress(0.85, '正在配置');
+        await configure(result.activeDirectory!, (progress, message) {
+          onProgress(0.85 + progress.clamp(0, 1) * 0.15, message);
+        });
+      }
+      await _layout.recordActiveVersion(component.id, component.version);
       onProgress(1, '安装完成');
     } on DownloadCancelledException {
       throw StateError('下载已取消');

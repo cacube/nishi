@@ -79,6 +79,7 @@ class SetupOrchestrator extends ChangeNotifier {
           status: SetupTaskStatus.pending,
           progress: 0,
           clearMessage: true,
+          clearUserActionRequest: true,
         );
       }
     }
@@ -102,6 +103,7 @@ class SetupOrchestrator extends ChangeNotifier {
         status: verified ? SetupTaskStatus.succeeded : SetupTaskStatus.failed,
         progress: verified ? 1 : current.progress,
         message: verified ? '安装已确认' : failureMessage ?? '安装未完成',
+        clearUserActionRequest: true,
       ),
     );
     if (verified) {
@@ -149,6 +151,7 @@ class SetupOrchestrator extends ChangeNotifier {
         status: SetupTaskStatus.running,
         progress: 0,
         clearMessage: true,
+        clearUserActionRequest: true,
       ),
     );
     _activeAction = action;
@@ -172,6 +175,7 @@ class SetupOrchestrator extends ChangeNotifier {
         current.copyWith(
           status: SetupTaskStatus.awaitingUser,
           message: error.message,
+          userActionRequest: error.request,
         ),
       );
     } on Object catch (error) {

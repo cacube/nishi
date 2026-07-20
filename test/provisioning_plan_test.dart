@@ -53,12 +53,31 @@ void main() {
       ),
     );
   });
+
+  test('skips components declared only for another host platform', () {
+    final manifest = RuntimeManifest(
+      schemaVersion: 1,
+      components: [
+        _component('flutter'),
+        _component(
+          'memurai',
+          platform: RuntimePlatform.windows,
+          architecture: RuntimeArchitecture.x64,
+        ),
+      ],
+    );
+
+    final plan = ProvisioningPlan.fromManifest(manifest, target);
+
+    expect(plan.entries.map((entry) => entry.component.id), ['flutter']);
+  });
 }
 
 RuntimeComponent _component(
   String id, {
   List<String> dependencies = const [],
   RuntimeArchitecture architecture = RuntimeArchitecture.arm64,
+  RuntimePlatform platform = RuntimePlatform.macos,
   bool external = false,
 }) {
   return RuntimeComponent(
@@ -73,7 +92,7 @@ RuntimeComponent _component(
         ? const []
         : [
             RuntimeArtifact(
-              platform: RuntimePlatform.macos,
+              platform: platform,
               architecture: architecture,
               officialUrl: Uri.parse('https://example.invalid/$id.zip'),
               sha256: 'a' * 64,
@@ -82,7 +101,7 @@ RuntimeComponent _component(
           ],
     executables: [
       RuntimeExecutable(
-        platform: RuntimePlatform.macos,
+        platform: platform,
         architectures: const [
           RuntimeArchitecture.x64,
           RuntimeArchitecture.arm64,

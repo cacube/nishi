@@ -55,6 +55,7 @@ class RuntimeComponent {
     required List<RuntimeExecutable> executables,
     required List<String> dependencies,
     this.service,
+    this.androidSdk,
   }) : artifacts = List.unmodifiable(artifacts),
        executables = List.unmodifiable(executables),
        dependencies = List.unmodifiable(dependencies);
@@ -68,9 +69,32 @@ class RuntimeComponent {
   final List<RuntimeExecutable> executables;
   final List<String> dependencies;
   final RuntimeServiceMetadata? service;
+  final RuntimeAndroidSdkMetadata? androidSdk;
 
   bool get isManaged => provisioning == RuntimeProvisioning.managed;
   bool get isExternal => provisioning == RuntimeProvisioning.external;
+}
+
+class RuntimeAndroidSdkMetadata {
+  RuntimeAndroidSdkMetadata({
+    required List<String> packages,
+    required this.license,
+  }) : packages = List.unmodifiable(packages);
+
+  final List<String> packages;
+  final RuntimeLicenseMetadata license;
+}
+
+class RuntimeLicenseMetadata {
+  const RuntimeLicenseMetadata({
+    required this.id,
+    required this.displayName,
+    required this.url,
+  });
+
+  final String id;
+  final String displayName;
+  final Uri url;
 }
 
 class RuntimeArtifact {
@@ -80,6 +104,8 @@ class RuntimeArtifact {
     required this.officialUrl,
     required this.sha256,
     required this.archiveType,
+    this.archiveRoot = '',
+    this.installSubdirectory = '',
   });
 
   final RuntimePlatform platform;
@@ -87,6 +113,8 @@ class RuntimeArtifact {
   final Uri officialUrl;
   final String sha256;
   final RuntimeArchiveType archiveType;
+  final String archiveRoot;
+  final String installSubdirectory;
 
   String get targetKey => '${platform.jsonValue}/${architecture.jsonValue}';
 }

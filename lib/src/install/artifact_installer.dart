@@ -98,8 +98,10 @@ final class ArtifactInstaller {
     }
 
     final staging = _layout.componentStaging(component.id, component.version);
+    final assembled = Directory('${staging.path}.assembled');
     try {
       await _deleteIfExists(staging);
+      await _deleteIfExists(assembled);
       await staging.create(recursive: true);
 
       switch (artifact.archiveType) {
@@ -116,11 +118,24 @@ final class ArtifactInstaller {
       }
 
       await _validateExtractedTree(staging);
-      await _validateExecutables(component, artifact, staging);
-      final active = await _activate(component, staging);
+      var contentRoot = await _selectContentRoot(staging, artifact);
+      if (artifact.installSubdirectory.isNotEmpty) {
+        contentRoot = await _assembleContentRoot(
+          contentRoot: contentRoot,
+          assembled: assembled,
+          installSubdirectory: artifact.installSubdirectory,
+        );
+      }
+      await _validateExecutables(component, artifact, contentRoot);
+      final active = await _activate(component, contentRoot);
+      if (_normalizedAbsolute(contentRoot.path) !=
+          _normalizedAbsolute(staging.path)) {
+        await _deleteIfExists(staging);
+      }
       return ArtifactInstallResult.activated(active);
     } on Object {
       await _deleteIfExists(staging);
+      await _deleteIfExists(assembled);
       rethrow;
     }
   }
@@ -248,6 +263,41 @@ final class ArtifactInstaller {
         }
       }
     }
+  }
+
+  Future<Directory> _selectContentRoot(
+    Directory staging,
+    RuntimeArtifact artifact,
+  ) async {
+    if (artifact.archiveRoot.isEmpty) return staging;
+    final relativePath = _validateRelativePath(
+      artifact.archiveRoot,
+      context: 'Archive root',
+    );
+    final root = Directory(_resolveInside(staging, relativePath));
+    final type = await FileSystemEntity.type(root.path, followLinks: false);
+    if (type != FileSystemEntityType.directory) {
+      throw ArtifactInstallException(
+        'Archive root is not a directory: ${artifact.archiveRoot}',
+      );
+    }
+    return root;
+  }
+
+  Future<Directory> _assembleContentRoot({
+    required Directory contentRoot,
+    required Directory assembled,
+    required String installSubdirectory,
+  }) async {
+    final relativePath = _validateRelativePath(
+      installSubdirectory,
+      context: 'Install subdirectory',
+    );
+    await assembled.create(recursive: true);
+    final destination = Directory(_resolveInside(assembled, relativePath));
+    await destination.parent.create(recursive: true);
+    await contentRoot.rename(destination.path);
+    return assembled;
   }
 
   Future<void> _validateExecutables(

@@ -90,6 +90,84 @@ void main() {
     expect(layout.componentStaging('tool', '1.0.0').existsSync(), isFalse);
   });
 
+  test('activates the selected root inside a vendor archive', () async {
+    final runner = _FakeProcessRunner((_, arguments) async {
+      if (arguments.first == '-tf') {
+        return _result(stdout: 'vendor-root/bin/tool\n');
+      }
+      final staging = Directory(arguments.last);
+      final executableFile = File(
+        '${staging.path}${Platform.pathSeparator}vendor-root'
+        '${Platform.pathSeparator}bin${Platform.pathSeparator}tool',
+      );
+      await executableFile.parent.create(recursive: true);
+      await executableFile.writeAsString('tool');
+      return _result();
+    });
+
+    final result =
+        await ArtifactInstaller(layout: layout, processRunner: runner).install(
+          component: _component(),
+          artifact: _artifact(
+            RuntimeArchiveType.zip,
+            archiveRoot: 'vendor-root',
+          ),
+          artifactFile: artifactFile,
+        );
+
+    expect(
+      File(
+        '${result.activeDirectory!.path}${Platform.pathSeparator}bin'
+        '${Platform.pathSeparator}tool',
+      ).existsSync(),
+      isTrue,
+    );
+    expect(
+      Directory(
+        '${result.activeDirectory!.path}${Platform.pathSeparator}vendor-root',
+      ).existsSync(),
+      isFalse,
+    );
+  });
+
+  test('places archive contents in a managed install subdirectory', () async {
+    final runner = _FakeProcessRunner((_, arguments) async {
+      if (arguments.first == '-tf') {
+        return _result(stdout: 'cmdline-tools/bin/tool\n');
+      }
+      final staging = Directory(arguments.last);
+      final executableFile = File(
+        '${staging.path}${Platform.pathSeparator}cmdline-tools'
+        '${Platform.pathSeparator}bin${Platform.pathSeparator}tool',
+      );
+      await executableFile.parent.create(recursive: true);
+      await executableFile.writeAsString('tool');
+      return _result();
+    });
+
+    final result =
+        await ArtifactInstaller(layout: layout, processRunner: runner).install(
+          component: _component(
+            executablePath: 'cmdline-tools/latest/bin/tool',
+          ),
+          artifact: _artifact(
+            RuntimeArchiveType.zip,
+            archiveRoot: 'cmdline-tools',
+            installSubdirectory: 'cmdline-tools/latest',
+          ),
+          artifactFile: artifactFile,
+        );
+
+    expect(
+      File(
+        '${result.activeDirectory!.path}${Platform.pathSeparator}cmdline-tools'
+        '${Platform.pathSeparator}latest${Platform.pathSeparator}bin'
+        '${Platform.pathSeparator}tool',
+      ).existsSync(),
+      isTrue,
+    );
+  });
+
   test('failed extraction preserves an existing version', () async {
     final existing = layout.componentVersion('tool', '1.0.0');
     await existing.create(recursive: true);
@@ -176,7 +254,7 @@ void main() {
   });
 }
 
-RuntimeComponent _component() {
+RuntimeComponent _component({String executablePath = 'bin/tool'}) {
   return RuntimeComponent(
     id: 'tool',
     displayName: 'Tool',
@@ -188,7 +266,7 @@ RuntimeComponent _component() {
       RuntimeExecutable(
         platform: RuntimePlatform.macos,
         architectures: [RuntimeArchitecture.arm64],
-        path: 'bin/tool',
+        path: executablePath,
       ),
     ],
     dependencies: const [],
@@ -198,6 +276,8 @@ RuntimeComponent _component() {
 RuntimeArtifact _artifact(
   RuntimeArchiveType type, {
   RuntimePlatform platform = RuntimePlatform.macos,
+  String archiveRoot = '',
+  String installSubdirectory = '',
 }) {
   return RuntimeArtifact(
     platform: platform,
@@ -205,6 +285,8 @@ RuntimeArtifact _artifact(
     officialUrl: Uri.parse('https://example.invalid/runtime'),
     sha256: '0' * 64,
     archiveType: type,
+    archiveRoot: archiveRoot,
+    installSubdirectory: installSubdirectory,
   );
 }
 

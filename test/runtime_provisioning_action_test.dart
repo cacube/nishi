@@ -60,6 +60,7 @@ void main() {
       '${Platform.pathSeparator}bin${Platform.pathSeparator}tool',
     );
     expect(await executable.readAsString(), 'runtime executable');
+    expect(await layout.readActiveVersions(), {'tool': '1.0.0'});
     expect(progress.last, 1);
     downloads.close();
   });
@@ -93,6 +94,56 @@ void main() {
         ),
       ),
     );
+    downloads.close();
+  });
+
+  test('runs post-install configuration before reporting completion', () async {
+    final bytes = utf8.encode('runtime executable');
+    server.listen((request) async {
+      request.response.add(bytes);
+      await request.response.close();
+    });
+    final downloads = DownloadManager();
+    final progress = <({double value, String? message})>[];
+    var postInstallRan = false;
+    final action = RuntimeProvisioningAction(
+      component: _component(),
+      artifact: _artifact(
+        server,
+        RuntimeArchiveType.raw,
+        sha256.convert(bytes).toString(),
+      ),
+      layout: layout,
+      downloads: downloads,
+      installer: ArtifactInstaller(layout: layout),
+      postInstall: (activeDirectory, onProgress) async {
+        expect(
+          activeDirectory.path,
+          layout.componentVersion('tool', '1.0.0').path,
+        );
+        postInstallRan = true;
+        onProgress(0.5, '配置运行时');
+      },
+    );
+
+    await action.execute(
+      (value, message) => progress.add((value: value, message: message)),
+    );
+
+    expect(postInstallRan, isTrue);
+    expect(
+      progress,
+      contains(
+        isA<({double value, String? message})>()
+            .having(
+              (item) => item.value,
+              'mapped progress',
+              closeTo(0.925, 0.001),
+            )
+            .having((item) => item.message, 'message', '配置运行时'),
+      ),
+    );
+    expect(progress.last.value, 1);
     downloads.close();
   });
 }

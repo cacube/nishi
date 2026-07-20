@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing Git tag to publish to, for example v0.1.0
+        description: Existing semver Git tag to publish, for example v0.1.0
         required: true
         type: string
       manifest:
@@ -18,35 +18,84 @@ on:
         default: release/runtime-manifest.sig.json
         type: string
 
+concurrency:
+  group: runtime-manifest-${{ inputs.tag }}
+  cancel-in-progress: false
+
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  verify-and-publish:
-    name: Verify and publish
+  verify:
+    name: Verify signed inputs
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      source_sha: ${{ steps.inputs.outputs.source_sha }}
+      manifest_sha256: ${{ steps.inputs.outputs.manifest_sha256 }}
+      signature_sha256: ${{ steps.inputs.outputs.signature_sha256 }}
     env:
-      GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.tag }}
       MANIFEST_PATH: ${{ inputs.manifest }}
       SIGNATURE_PATH: ${{ inputs.signature }}
       RUNTIME_MANIFEST_PUBLIC_KEY_BASE64: ${{ vars.RUNTIME_MANIFEST_PUBLIC_KEY_BASE64 }}
       RUNTIME_MANIFEST_KEY_ID: ${{ vars.RUNTIME_MANIFEST_KEY_ID }}
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
+      - name: Validate tag input
+        shell: bash
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must be a semver tag beginning with v." >&2
+            exit 1
+          fi
+          git check-ref-format "refs/tags/$RELEASE_TAG"
 
-      - name: Set up stable Flutter
-        uses: subosito/flutter-action@v2
+      - name: Check out release tag
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
         with:
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Bind checkout and release inputs
+        id: inputs
+        shell: bash
+        run: |
+          tag_sha="$(git rev-parse "$RELEASE_TAG^{commit}")"
+          head_sha="$(git rev-parse HEAD)"
+          if [[ "$tag_sha" != "$head_sha" ]]; then
+            echo "Checked-out commit does not match $RELEASE_TAG." >&2
+            exit 1
+          fi
+
+          for path in "$MANIFEST_PATH" "$SIGNATURE_PATH"; do
+            if [[ ! "$path" =~ ^[A-Za-z0-9._/-]+$ || "$path" = /* || "$path" == *'..'* ]]; then
+              echo "Release asset paths must be safe repository-relative paths." >&2
+              exit 1
+            fi
+            if ! git ls-files --error-unmatch -- "$path" >/dev/null; then
+              echo "$path is not tracked by the release tag." >&2
+              exit 1
+            fi
+            if [[ ! -f "$path" || -L "$path" ]]; then
+              echo "$path must be a regular non-symlink file." >&2
+              exit 1
+            fi
+          done
+
+          echo "source_sha=$head_sha" >> "$GITHUB_OUTPUT"
+          echo "manifest_sha256=$(sha256sum "$MANIFEST_PATH" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "signature_sha256=$(sha256sum "$SIGNATURE_PATH" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up pinned Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: 3.44.6
           channel: stable
           cache: true
 
-      - name: Install dependencies
-        run: flutter pub get
+      - name: Install locked dependencies
+        run: flutter pub get --enforce-lockfile
 
       - name: Require release public key
         shell: bash
@@ -60,25 +109,6 @@ jobs:
             exit 1
           fi
 
-      - name: Validate release inputs
-        shell: bash
-        run: |
-          manifest_real="$(realpath "$MANIFEST_PATH")"
-          signature_real="$(realpath "$SIGNATURE_PATH")"
-
-          case "$manifest_real" in
-            "$GITHUB_WORKSPACE"/*) ;;
-            *) echo "Manifest must be inside the repository workspace." >&2; exit 1 ;;
-          esac
-          case "$signature_real" in
-            "$GITHUB_WORKSPACE"/*) ;;
-            *) echo "Signature must be inside the repository workspace." >&2; exit 1 ;;
-          esac
-          if [[ "$MANIFEST_PATH" == *'#'* || "$SIGNATURE_PATH" == *'#'* ]]; then
-            echo "Release asset paths cannot contain #." >&2
-            exit 1
-          fi
-
       - name: Verify detached manifest signature
         shell: bash
         run: |
@@ -88,22 +118,64 @@ jobs:
             --public-key "$RUNTIME_MANIFEST_PUBLIC_KEY_BASE64" \
             --key-id "$RUNTIME_MANIFEST_KEY_ID"
 
-      - name: Ensure release exists
+  publish:
+    name: Publish verified assets
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    environment: runtime-release
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      MANIFEST_PATH: ${{ inputs.manifest }}
+      SIGNATURE_PATH: ${{ inputs.signature }}
+      SOURCE_SHA: ${{ needs.verify.outputs.source_sha }}
+      EXPECTED_MANIFEST_SHA256: ${{ needs.verify.outputs.manifest_sha256 }}
+      EXPECTED_SIGNATURE_SHA256: ${{ needs.verify.outputs.signature_sha256 }}
+    steps:
+      - name: Download and publish exact verified inputs
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --verify-tag \
-              --title "$RELEASE_TAG" \
-              --generate-notes
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists; existing assets are never overwritten." >&2
+            exit 1
           fi
 
-      - name: Upload verified manifest assets
-        shell: bash
-        run: |
-          gh release upload "$RELEASE_TAG" \
-            "$MANIFEST_PATH#runtime-manifest.json" \
-            "$SIGNATURE_PATH#runtime-manifest.sig.json" \
+          remote_tag_sha="$(
+            git ls-remote "https://github.com/$GITHUB_REPOSITORY.git" \
+              "refs/tags/$RELEASE_TAG^{}" "refs/tags/$RELEASE_TAG" |
+              awk '/\^\{\}$/ {peeled=$1} !/\^\{\}$/ {direct=$1} END {print peeled ? peeled : direct}'
+          )"
+          if [[ "$remote_tag_sha" != "$SOURCE_SHA" ]]; then
+            echo "Release tag moved after verification." >&2
+            exit 1
+          fi
+
+          mkdir -m 700 release-inputs
+          gh api \
+            -H 'Accept: application/vnd.github.raw+json' \
+            "repos/$GITHUB_REPOSITORY/contents/$MANIFEST_PATH?ref=$SOURCE_SHA" \
+            > release-inputs/runtime-manifest.json
+          gh api \
+            -H 'Accept: application/vnd.github.raw+json' \
+            "repos/$GITHUB_REPOSITORY/contents/$SIGNATURE_PATH?ref=$SOURCE_SHA" \
+            > release-inputs/runtime-manifest.sig.json
+
+          echo "$EXPECTED_MANIFEST_SHA256  release-inputs/runtime-manifest.json" | sha256sum --check --strict
+          echo "$EXPECTED_SIGNATURE_SHA256  release-inputs/runtime-manifest.sig.json" | sha256sum --check --strict
+
+          gh release create "$RELEASE_TAG" \
+            "release-inputs/runtime-manifest.json#runtime-manifest.json" \
+            "release-inputs/runtime-manifest.sig.json#runtime-manifest.sig.json" \
             --repo "$GITHUB_REPOSITORY" \
-            --clobber
+            --verify-tag \
+            --draft \
+            --title "$RELEASE_TAG" \
+            --generate-notes
+          gh release edit "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false \
+            --latest

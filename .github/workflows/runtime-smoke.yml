@@ -1,0 +1,89 @@
+name: Runtime clean-machine smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: Repository-relative path to an unsigned local manifest
+        required: true
+        default: release/runtime-manifest.json
+        type: string
+      mode:
+        description: Validation is cheap; download/install fetch large vendor archives
+        required: true
+        default: validate
+        type: choice
+        options:
+          - validate
+          - download
+          - install
+      components:
+        description: Comma-separated IDs, ordered client toolchain then server toolchain
+        required: true
+        default: flutter,jdk,android-sdk,go,node,mysql
+        type: string
+      accept_android_licenses:
+        description: Accept Android SDK licenses and install manifest packages
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  runtime-smoke:
+    name: ${{ matrix.name }} (${{ inputs.mode }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-2025
+          - name: macOS
+            os: macos-15
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    env:
+      MANIFEST_PATH: ${{ inputs.manifest }}
+      SMOKE_MODE: ${{ inputs.mode }}
+      SMOKE_COMPONENTS: ${{ inputs.components }}
+      ACCEPT_ANDROID_LICENSES: ${{ inputs.accept_android_licenses }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+
+      - name: Set up pinned Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: 3.44.6
+          channel: stable
+          cache: true
+
+      - name: Install locked package dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Restore verified vendor downloads
+        if: inputs.mode != 'validate'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            .runtime-smoke/DevEnvironmentManager/cache
+            .runtime-smoke/Library/Application Support/DevEnvironmentManager/cache
+          key: runtime-smoke-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(inputs.manifest) }}
+          restore-keys: |
+            runtime-smoke-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Validate, download, or activate runtime artifacts
+        shell: bash
+        run: |
+          dart run scripts/runtime_smoke.dart \
+            --manifest="$MANIFEST_PATH" \
+            --mode="$SMOKE_MODE" \
+            --components="$SMOKE_COMPONENTS" \
+            --accept-android-licenses="$ACCEPT_ANDROID_LICENSES" \
+            --root=.runtime-smoke

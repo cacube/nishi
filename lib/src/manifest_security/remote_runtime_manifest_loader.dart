@@ -127,12 +127,33 @@ final class RemoteRuntimeManifestLoader {
     HttpClientRequest? request;
     try {
       return await (() async {
-        request = await _httpClient.getUrl(uri);
-        request!.followRedirects = false;
-        final response = await request!.close();
+        var currentUri = uri;
+        var redirectCount = 0;
+        late HttpClientResponse response;
+        while (true) {
+          _validateEndpoint(currentUri);
+          request = await _httpClient.getUrl(currentUri);
+          request!.followRedirects = false;
+          response = await request!.close();
+          if (!_isRedirect(response.statusCode)) break;
+
+          final location = response.headers.value(HttpHeaders.locationHeader);
+          if (location == null || redirectCount >= 5) {
+            throw RemoteManifestHttpException(
+              uri: currentUri,
+              resource: resource,
+              statusCode: response.statusCode,
+            );
+          }
+          final redirectUri = currentUri.resolve(location);
+          _validateEndpoint(redirectUri);
+          await response.drain<void>();
+          currentUri = redirectUri;
+          redirectCount += 1;
+        }
         if (response.statusCode != HttpStatus.ok) {
           throw RemoteManifestHttpException(
-            uri: uri,
+            uri: currentUri,
             resource: resource,
             statusCode: response.statusCode,
           );
@@ -188,6 +209,14 @@ final class RemoteRuntimeManifestLoader {
         cause: error,
       );
     }
+  }
+
+  bool _isRedirect(int statusCode) {
+    return statusCode == HttpStatus.movedPermanently ||
+        statusCode == HttpStatus.found ||
+        statusCode == HttpStatus.seeOther ||
+        statusCode == HttpStatus.temporaryRedirect ||
+        statusCode == HttpStatus.permanentRedirect;
   }
 
   _SignatureEnvelope _decodeSignatureEnvelope(List<int> bytes) {

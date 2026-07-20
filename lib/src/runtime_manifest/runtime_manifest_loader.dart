@@ -60,6 +60,7 @@ class _ManifestReader {
   RuntimeComponent _readComponent(Map<String, Object?> json, int index) {
     final path = '\$.components[$index]';
     final service = _optionalObject(json, 'service', path);
+    final androidSdk = _optionalObject(json, 'androidSdk', path);
     return RuntimeComponent(
       id: _requiredString(json, 'id', path) ?? '',
       displayName: _requiredString(json, 'displayName', path) ?? '',
@@ -86,6 +87,9 @@ class _ManifestReader {
           .toList(),
       dependencies: _stringList(json, 'dependencies', path),
       service: service == null ? null : _readService(service, '$path.service'),
+      androidSdk: androidSdk == null
+          ? null
+          : _readAndroidSdk(androidSdk, '$path.androidSdk'),
     );
   }
 
@@ -115,6 +119,9 @@ class _ManifestReader {
         RuntimeArchiveType.values,
         (value) => value.jsonValue,
       ),
+      archiveRoot: _optionalString(json, 'archiveRoot', path) ?? '',
+      installSubdirectory:
+          _optionalString(json, 'installSubdirectory', path) ?? '',
     );
   }
 
@@ -149,12 +156,42 @@ class _ManifestReader {
     );
   }
 
+  RuntimeAndroidSdkMetadata _readAndroidSdk(
+    Map<String, Object?> json,
+    String path,
+  ) {
+    final license = _optionalObject(json, 'license', path);
+    return RuntimeAndroidSdkMetadata(
+      packages: _stringList(json, 'packages', path),
+      license: license == null
+          ? RuntimeLicenseMetadata(id: '', displayName: '', url: Uri())
+          : _readLicense(license, '$path.license'),
+    );
+  }
+
+  RuntimeLicenseMetadata _readLicense(Map<String, Object?> json, String path) {
+    final url = _requiredString(json, 'url', path) ?? '';
+    return RuntimeLicenseMetadata(
+      id: _requiredString(json, 'id', path) ?? '',
+      displayName: _requiredString(json, 'displayName', path) ?? '',
+      url: Uri.tryParse(url) ?? Uri(),
+    );
+  }
+
   String? _requiredString(Map<String, Object?> json, String key, String path) {
     final value = json[key];
     if (value is String) {
       return value;
     }
     _typeError(path, key, 'a string', value);
+    return null;
+  }
+
+  String? _optionalString(Map<String, Object?> json, String key, String path) {
+    final value = json[key];
+    if (value == null) return null;
+    if (value is String) return value;
+    _typeError(path, key, 'a string or null', value);
     return null;
   }
 

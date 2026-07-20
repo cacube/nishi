@@ -98,18 +98,16 @@ void main() {
       );
     });
 
-    test('production environment entry point fails without dart-defines', () {
-      expect(
-        RemoteManifestReleaseConfiguration.fromEnvironment,
-        throwsA(
-          isA<RemoteManifestReleaseConfigurationException>().having(
-            (error) => error.environmentKey,
-            'environmentKey',
-            RemoteManifestReleaseConfiguration.signingKeyIdEnvironmentKey,
-          ),
-        ),
-      );
-    });
+    test(
+      'production environment entry point uses the embedded release key',
+      () {
+        final configuration =
+            RemoteManifestReleaseConfiguration.fromEnvironment();
+
+        expect(configuration.signingKeyId, 'nishi-release-2026-01');
+        expect(configuration.signingPublicKeyBytes, hasLength(32));
+      },
+    );
 
     test('rejects an insecure manifest URL', () {
       expect(

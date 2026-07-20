@@ -20,6 +20,8 @@ void main() {
     expect(mysql.artifacts.single.platform, RuntimePlatform.windows);
     expect(mysql.artifacts.single.architecture, RuntimeArchitecture.x64);
     expect(mysql.artifacts.single.archiveType, RuntimeArchiveType.zip);
+    expect(mysql.artifacts.single.archiveRoot, 'mysql-test');
+    expect(mysql.artifacts.single.installSubdirectory, 'runtime');
     expect(mysql.service?.defaultPort, 3306);
     expect(mysql.service?.startAutomatically, isTrue);
     expect(mysql.executables.single.path, r'bin\mysql.exe');
@@ -60,6 +62,8 @@ void main() {
 
     artifact['officialUrl'] = 'http://downloads.example.invalid/mysql.zip';
     artifact['sha256'] = 'not-a-production-checksum';
+    artifact['archiveRoot'] = '../outside';
+    artifact['installSubdirectory'] = '../runtime';
     artifacts.add(Map<String, String>.from(artifact));
     mysql['dependencies'] = ['missing-component'];
     jdk['artifacts'] = [Map<String, String>.from(artifact)];
@@ -73,6 +77,8 @@ void main() {
           containsAll([
             r'$.components[0].artifacts[0].officialUrl',
             r'$.components[0].artifacts[0].sha256',
+            r'$.components[0].artifacts[0].archiveRoot',
+            r'$.components[0].artifacts[0].installSubdirectory',
             r'$.components[0].artifacts[1]',
             r'$.components[0].dependencies[0]',
             r'$.components[1].artifacts',
@@ -129,6 +135,92 @@ void main() {
       throwsA(isA<RuntimeManifestValidationException>()),
     );
   });
+
+  test('loads and validates Android SDK package and license metadata', () {
+    final fixture = _validTestFixture();
+    final components = fixture['components']! as List<Object?>;
+    fixture['components'] = [...components, _androidSdkFixture()];
+
+    final manifest = loader.fromJson(fixture);
+    final android = manifest.componentById('android-sdk')!.androidSdk!;
+
+    expect(android.packages, [
+      'platform-tools',
+      'platforms;android-36',
+      'build-tools;36.0.0',
+    ]);
+    expect(android.license.id, 'android-sdk-license');
+    expect(
+      android.license.url,
+      Uri.parse('https://developer.android.com/studio/terms'),
+    );
+  });
+
+  test('rejects unsafe Android SDK metadata', () {
+    final fixture = _validTestFixture();
+    final components = fixture['components']! as List<Object?>;
+    final android = _androidSdkFixture();
+    final metadata = android['androidSdk']! as Map<String, Object?>;
+    metadata['packages'] = ['platform-tools', 'platform-tools', 'bad\npackage'];
+    final license = metadata['license']! as Map<String, Object?>;
+    license['url'] = 'http://example.invalid/license';
+    fixture['components'] = [...components, android];
+
+    expect(
+      () => loader.fromJson(fixture),
+      throwsA(
+        isA<RuntimeManifestValidationException>().having(
+          (error) => error.errors.map((item) => item.path),
+          'error paths',
+          containsAll([
+            r'$.components[2].androidSdk.packages[1]',
+            r'$.components[2].androidSdk.packages[2]',
+            r'$.components[2].androidSdk.license.url',
+          ]),
+        ),
+      ),
+    );
+  });
+}
+
+Map<String, Object?> _androidSdkFixture() {
+  return {
+    'id': 'android-sdk',
+    'displayName': 'Android SDK test fixture',
+    'version': '36-test',
+    'minimumCompatibleVersion': '36',
+    'provisioning': 'managed',
+    'artifacts': [
+      {
+        'platform': 'macos',
+        'architecture': 'arm64',
+        'officialUrl':
+            'https://downloads.example.invalid/non-production/android.zip',
+        'sha256': 'b' * 64,
+        'archiveType': 'zip',
+      },
+    ],
+    'executables': [
+      {
+        'platform': 'macos',
+        'architectures': ['arm64'],
+        'path': 'cmdline-tools/latest/bin/sdkmanager',
+      },
+    ],
+    'dependencies': ['jdk'],
+    'androidSdk': {
+      'packages': [
+        'platform-tools',
+        'platforms;android-36',
+        'build-tools;36.0.0',
+      ],
+      'license': {
+        'id': 'android-sdk-license',
+        'displayName': 'Android SDK License Agreement',
+        'url': 'https://developer.android.com/studio/terms',
+      },
+    },
+  };
 }
 
 // This fixture is intentionally non-production. Its example.invalid URL and
@@ -151,6 +243,8 @@ Map<String, Object?> _validTestFixture() {
                 'https://downloads.example.invalid/non-production/mysql.zip',
             'sha256': 'a' * 64,
             'archiveType': 'zip',
+            'archiveRoot': 'mysql-test',
+            'installSubdirectory': 'runtime',
           },
         ],
         'executables': [

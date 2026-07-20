@@ -26,6 +26,9 @@ class RuntimeManifestValidator {
 
   static final RegExp _componentIdPattern = RegExp(r'^[a-z][a-z0-9_-]*$');
   static final RegExp _sha256Pattern = RegExp(r'^[a-fA-F0-9]{64}$');
+  static final RegExp _androidPackagePattern = RegExp(
+    r'^[A-Za-z0-9_.-]+(?:;[A-Za-z0-9_.-]+)*$',
+  );
 
   List<RuntimeManifestValidationError> validate(RuntimeManifest manifest) {
     final errors = <RuntimeManifestValidationError>[];
@@ -159,6 +162,44 @@ class RuntimeManifestValidator {
           ),
         );
       }
+      if (artifact.archiveRoot.isNotEmpty) {
+        if (!_isSafeRelativePath(artifact.archiveRoot)) {
+          errors.add(
+            RuntimeManifestValidationError(
+              '$artifactPath.archiveRoot',
+              'must be a safe relative path inside the archive',
+            ),
+          );
+        }
+        if (artifact.archiveType != RuntimeArchiveType.zip &&
+            artifact.archiveType != RuntimeArchiveType.tarGz) {
+          errors.add(
+            RuntimeManifestValidationError(
+              '$artifactPath.archiveRoot',
+              'is only supported for zip and tar.gz artifacts',
+            ),
+          );
+        }
+      }
+      if (artifact.installSubdirectory.isNotEmpty) {
+        if (!_isSafeRelativePath(artifact.installSubdirectory)) {
+          errors.add(
+            RuntimeManifestValidationError(
+              '$artifactPath.installSubdirectory',
+              'must be a safe relative path inside the managed runtime',
+            ),
+          );
+        }
+        if (artifact.archiveType != RuntimeArchiveType.zip &&
+            artifact.archiveType != RuntimeArchiveType.tarGz) {
+          errors.add(
+            RuntimeManifestValidationError(
+              '$artifactPath.installSubdirectory',
+              'is only supported for zip and tar.gz artifacts',
+            ),
+          );
+        }
+      }
     }
 
     final executableKeys = <String>{};
@@ -249,6 +290,82 @@ class RuntimeManifestValidator {
         );
       }
     }
+
+    final androidSdk = component.androidSdk;
+    if (androidSdk != null) {
+      final metadataPath = '$path.androidSdk';
+      if (!component.isManaged) {
+        errors.add(
+          RuntimeManifestValidationError(
+            metadataPath,
+            'requires a managed component',
+          ),
+        );
+      }
+      if (!component.dependencies.contains('jdk')) {
+        errors.add(
+          RuntimeManifestValidationError(
+            '$path.dependencies',
+            'Android SDK setup requires the jdk dependency',
+          ),
+        );
+      }
+      final packages = <String>{};
+      for (var index = 0; index < androidSdk.packages.length; index++) {
+        final package = androidSdk.packages[index];
+        if (!packages.add(package)) {
+          errors.add(
+            RuntimeManifestValidationError(
+              '$metadataPath.packages[$index]',
+              'duplicates package $package',
+            ),
+          );
+        }
+        if (!_androidPackagePattern.hasMatch(package)) {
+          errors.add(
+            RuntimeManifestValidationError(
+              '$metadataPath.packages[$index]',
+              'contains an invalid Android SDK package identifier',
+            ),
+          );
+        }
+      }
+      if (!packages.contains('platform-tools') ||
+          !packages.any((value) => value.startsWith('platforms;android-')) ||
+          !packages.any((value) => value.startsWith('build-tools;'))) {
+        errors.add(
+          RuntimeManifestValidationError(
+            '$metadataPath.packages',
+            'must include platform-tools, an Android platform, and build-tools',
+          ),
+        );
+      }
+      final license = androidSdk.license;
+      if (!_componentIdPattern.hasMatch(license.id)) {
+        errors.add(
+          RuntimeManifestValidationError(
+            '$metadataPath.license.id',
+            'must match ${_componentIdPattern.pattern}',
+          ),
+        );
+      }
+      _requireNonBlank(
+        license.displayName,
+        '$metadataPath.license.displayName',
+        errors,
+      );
+      if (license.url.scheme != 'https' ||
+          license.url.host.isEmpty ||
+          license.url.userInfo.isNotEmpty ||
+          license.url.hasFragment) {
+        errors.add(
+          RuntimeManifestValidationError(
+            '$metadataPath.license.url',
+            'must be an absolute HTTPS URL without credentials or a fragment',
+          ),
+        );
+      }
+    }
   }
 
   void _validateDependencies(
@@ -328,5 +445,18 @@ class RuntimeManifestValidator {
     if (value.trim().isEmpty) {
       errors.add(RuntimeManifestValidationError(path, 'must not be blank'));
     }
+  }
+
+  bool _isSafeRelativePath(String value) {
+    if (value.contains('\u0000') ||
+        value.startsWith('/') ||
+        value.startsWith(r'\') ||
+        RegExp(r'^[A-Za-z]:').hasMatch(value)) {
+      return false;
+    }
+    final segments = value.replaceAll(r'\', '/').split('/');
+    return segments.every(
+      (segment) => segment.isNotEmpty && segment != '.' && segment != '..',
+    );
   }
 }

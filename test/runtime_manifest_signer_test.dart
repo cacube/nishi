@@ -115,6 +115,14 @@ void main() {
         stdoutBuffer.toString(),
         contains(privateKey['publicKey'] as String),
       );
+      if (!Platform.isWindows) {
+        final mode = (await privateKeyFile.stat()).mode;
+        expect(
+          mode & 0x3f,
+          0,
+          reason: 'private key must not be group/world accessible',
+        );
+      }
     },
   );
 

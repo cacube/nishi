@@ -25,6 +25,13 @@ final class ProvisioningPlan {
     final entriesById = <String, ProvisioningPlanEntry>{};
 
     for (final component in manifest.components) {
+      final appliesToTarget = component.executables.any(
+        (executable) =>
+            executable.platform == target.platform &&
+            executable.architectures.contains(target.architecture),
+      );
+      if (!appliesToTarget) continue;
+
       RuntimeArtifact? artifact;
       if (component.isManaged) {
         final matching = component.artifacts.where(
@@ -44,6 +51,17 @@ final class ProvisioningPlan {
       );
     }
 
+    for (final entry in entriesById.values) {
+      for (final dependency in entry.component.dependencies) {
+        if (!entriesById.containsKey(dependency)) {
+          errors.add(
+            '${entry.component.id}: dependency $dependency is not available '
+            'for $target',
+          );
+        }
+      }
+    }
+
     if (errors.isNotEmpty) throw ProvisioningPlanException(errors);
 
     final ordered = <ProvisioningPlanEntry>[];
@@ -58,7 +76,7 @@ final class ProvisioningPlan {
     }
 
     for (final component in manifest.components) {
-      visit(component.id);
+      if (entriesById.containsKey(component.id)) visit(component.id);
     }
     return ProvisioningPlan._(
       target: target,

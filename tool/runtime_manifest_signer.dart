@@ -193,14 +193,35 @@ Future<void> _generateKey(_Options options) async {
   }
   final keyPair = await Ed25519().newKeyPair();
   final extractedKeyPair = await keyPair.extract();
+  var privateKeyCreated = false;
+  var publicKeyCreated = false;
   try {
     final publicKeyBase64 = base64Encode(extractedKeyPair.publicKey.bytes);
+    privateKeyCreated = true;
     await privateKeyFile.writeAsString(
       '${jsonEncode({'keyId': keyId, 'algorithm': 'Ed25519', 'privateKey': base64Encode(extractedKeyPair.bytes), 'publicKey': publicKeyBase64})}\n',
     );
+    if (!Platform.isWindows) {
+      final chmod = await Process.run('chmod', ['600', privateKeyFile.path]);
+      if (chmod.exitCode != 0) {
+        throw FileSystemException(
+          'Could not restrict private key permissions',
+          privateKeyFile.path,
+        );
+      }
+    }
+    publicKeyCreated = true;
     await publicKeyFile.writeAsString(
       '${jsonEncode({'keyId': keyId, 'algorithm': 'Ed25519', 'publicKey': publicKeyBase64})}\n',
     );
+  } on Object {
+    if (publicKeyCreated && await publicKeyFile.exists()) {
+      await publicKeyFile.delete();
+    }
+    if (privateKeyCreated && await privateKeyFile.exists()) {
+      await privateKeyFile.delete();
+    }
+    rethrow;
   } finally {
     extractedKeyPair.destroy();
   }

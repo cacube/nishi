@@ -23,6 +23,7 @@ class DevEnvironmentApp extends StatelessWidget {
         useMaterial3: true,
         fontFamilyFallback: const ['PingFang SC', 'Microsoft YaHei'],
         cardTheme: const CardThemeData(
+          color: Colors.white,
           elevation: 0,
           margin: EdgeInsets.zero,
           shape: RoundedRectangleBorder(

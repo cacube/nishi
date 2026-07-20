@@ -83,6 +83,66 @@ void main() {
     expect(manifest.componentById('git')?.version, '2.52.0-test');
   });
 
+  test('follows signed manifest and signature redirects', () async {
+    final signature = await algorithm.sign(manifestBytes, keyPair: keyPair);
+    server.listen((request) async {
+      switch (request.uri.path) {
+        case '/latest/manifest.json':
+          request.response.statusCode = HttpStatus.found;
+          request.response.headers.set(
+            HttpHeaders.locationHeader,
+            '/assets/manifest.json',
+          );
+        case '/latest/manifest.sig':
+          request.response.statusCode = HttpStatus.found;
+          request.response.headers.set(
+            HttpHeaders.locationHeader,
+            '/assets/manifest.sig',
+          );
+        case '/assets/manifest.json':
+          request.response.add(manifestBytes);
+        case '/assets/manifest.sig':
+          request.response.write(
+            jsonEncode({
+              'keyId': 'test-key',
+              'signature': base64Encode(signature.bytes),
+            }),
+          );
+      }
+      await request.response.close();
+    });
+    final loader = testLoader(publicKey.bytes);
+    addTearDown(() => loader.close(force: true));
+
+    final manifest = await loader.load(
+      manifestUri: serverUri('/latest/manifest.json'),
+      signatureUri: serverUri('/latest/manifest.sig'),
+    );
+
+    expect(manifest.componentById('git')?.version, '2.52.0-test');
+  });
+
+  test('rejects a redirect to an insecure endpoint', () async {
+    server.listen((request) async {
+      request.response.statusCode = HttpStatus.found;
+      request.response.headers.set(
+        HttpHeaders.locationHeader,
+        'http://example.invalid/manifest.json',
+      );
+      await request.response.close();
+    });
+    final loader = testLoader(publicKey.bytes);
+    addTearDown(() => loader.close(force: true));
+
+    await expectLater(
+      loader.load(
+        manifestUri: serverUri('/latest/manifest.json'),
+        signatureUri: serverUri('/latest/manifest.sig'),
+      ),
+      throwsA(isA<InsecureManifestUriException>()),
+    );
+  });
+
   test('rejects HTTP unless it is explicitly enabled for testing', () async {
     var requests = 0;
     server.listen((request) async {

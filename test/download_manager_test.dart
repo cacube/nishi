@@ -50,6 +50,39 @@ void main() {
     manager.close();
   });
 
+  test('requests identity encoding again after a redirect', () async {
+    final receivedEncodings = <String?>[];
+    server.listen((request) async {
+      receivedEncodings.add(
+        request.headers.value(HttpHeaders.acceptEncodingHeader),
+      );
+      if (request.uri.path == '/redirect') {
+        request.response.statusCode = HttpStatus.found;
+        request.response.headers.set(
+          HttpHeaders.locationHeader,
+          '/runtime.zip',
+        );
+      } else {
+        request.response.contentLength = 5;
+        request.response.add([104, 101, 108, 108, 111]);
+      }
+      await request.response.close();
+    });
+    final manager = DownloadManager();
+
+    final result = await manager.download(
+      source: _serverUri(server).replace(path: '/redirect'),
+      destinationDirectory: destinationDirectory,
+      fileName: 'runtime.zip',
+      expectedSha256:
+          '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824',
+    );
+
+    expect(await result.file.readAsString(), 'hello');
+    expect(receivedEncodings, ['identity', 'identity']);
+    manager.close();
+  });
+
   test('resumes a partial download with an HTTP range request', () async {
     final receivedRanges = <String?>[];
     server.listen((request) async {

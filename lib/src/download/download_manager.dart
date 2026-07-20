@@ -187,35 +187,75 @@ final class DownloadManager {
       source: source,
       timeout: timeout,
     );
-    final request = await _httpClient
-        .getUrl(source)
-        .timeout(timeout, onTimeout: () => throw timeoutError);
-    cancellationToken?.throwIfCancelled();
-    request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
-    if (rangeStart != null) {
-      request.headers.set(HttpHeaders.rangeHeader, 'bytes=$rangeStart-');
-    }
-
-    final removeCancellationListener = cancellationToken?._onCancel(
-      () => request.abort(const DownloadCancelledException()),
-    );
-    try {
-      final response = await request.close().timeout(
-        timeout,
-        onTimeout: () {
-          request.abort(timeoutError);
-          throw timeoutError;
-        },
-      );
-      return _OpenedResponse(
-        request: request,
-        response: response,
-        removeCancellationListener: removeCancellationListener ?? () {},
-      );
-    } catch (_) {
-      removeCancellationListener?.call();
+    var currentSource = source;
+    for (var redirectCount = 0; ; redirectCount += 1) {
+      final request = await _httpClient
+          .getUrl(currentSource)
+          .timeout(timeout, onTimeout: () => throw timeoutError);
       cancellationToken?.throwIfCancelled();
-      rethrow;
+      request.followRedirects = false;
+      request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
+      if (rangeStart != null) {
+        request.headers.set(HttpHeaders.rangeHeader, 'bytes=$rangeStart-');
+      }
+
+      final removeCancellationListener = cancellationToken?._onCancel(
+        () => request.abort(const DownloadCancelledException()),
+      );
+      try {
+        final response = await request.close().timeout(
+          timeout,
+          onTimeout: () {
+            request.abort(timeoutError);
+            throw timeoutError;
+          },
+        );
+        final openedResponse = _OpenedResponse(
+          request: request,
+          response: response,
+          removeCancellationListener: removeCancellationListener ?? () {},
+        );
+        if (!_isRedirect(response.statusCode)) {
+          return openedResponse;
+        }
+
+        final location = response.headers.value(HttpHeaders.locationHeader);
+        if (location == null || redirectCount >= 5) {
+          openedResponse.abort(
+            const HttpException('Download redirect was invalid or excessive'),
+          );
+          openedResponse.dispose();
+          throw HttpException(
+            'Download redirect was invalid or excessive',
+            uri: currentSource,
+          );
+        }
+        final redirectSource = currentSource.resolve(location);
+        if (!_isAllowedRedirect(currentSource, redirectSource)) {
+          openedResponse.abort(
+            const HttpException('Download redirect was not secure'),
+          );
+          openedResponse.dispose();
+          throw HttpException(
+            'Download redirect was not secure',
+            uri: redirectSource,
+          );
+        }
+        try {
+          await _drainResponse(
+            openedResponse,
+            source: currentSource,
+            cancellationToken: cancellationToken,
+          );
+        } finally {
+          openedResponse.dispose();
+        }
+        currentSource = redirectSource;
+      } catch (_) {
+        removeCancellationListener?.call();
+        cancellationToken?.throwIfCancelled();
+        rethrow;
+      }
     }
   }
 
@@ -430,6 +470,24 @@ bool _rangeStartsAt(HttpClientResponse response, int expectedStart) {
     r'^bytes (\d+)-\d+/(?:\d+|\*)$',
   ).firstMatch(contentRange ?? '');
   return match != null && int.parse(match.group(1)!) == expectedStart;
+}
+
+bool _isRedirect(int statusCode) {
+  return statusCode == HttpStatus.movedPermanently ||
+      statusCode == HttpStatus.found ||
+      statusCode == HttpStatus.seeOther ||
+      statusCode == HttpStatus.temporaryRedirect ||
+      statusCode == HttpStatus.permanentRedirect;
+}
+
+bool _isAllowedRedirect(Uri source, Uri redirect) {
+  final schemeIsAllowed =
+      redirect.scheme == 'https' ||
+      (source.scheme == 'http' && redirect.scheme == 'http');
+  return schemeIsAllowed &&
+      redirect.host.isNotEmpty &&
+      redirect.userInfo.isEmpty &&
+      !redirect.hasFragment;
 }
 
 Future<void> _activate({required File partial, required File target}) async {

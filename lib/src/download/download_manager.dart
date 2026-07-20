@@ -191,6 +191,7 @@ final class DownloadManager {
         .getUrl(source)
         .timeout(timeout, onTimeout: () => throw timeoutError);
     cancellationToken?.throwIfCancelled();
+    request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
     if (rangeStart != null) {
       request.headers.set(HttpHeaders.rangeHeader, 'bytes=$rangeStart-');
     }

@@ -21,7 +21,9 @@ void main() {
   });
 
   test('downloads to the caller directory and reports progress', () async {
+    String? acceptEncoding;
     server.listen((request) async {
+      acceptEncoding = request.headers.value(HttpHeaders.acceptEncodingHeader);
       request.response.contentLength = 5;
       request.response.add([104, 101, 108, 108, 111]);
       await request.response.close();
@@ -44,6 +46,7 @@ void main() {
     expect(progress, isNotEmpty);
     expect(progress.last.downloadedBytes, 5);
     expect(progress.last.totalBytes, 5);
+    expect(acceptEncoding, 'identity');
     manager.close();
   });
 

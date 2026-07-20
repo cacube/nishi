@@ -231,8 +231,12 @@ final class AndroidSdkConfigurator {
         process.kill();
         throw const AndroidSdkConfigurationCancelledException();
       }
-      final stdout = process.stdout.transform(utf8.decoder).join();
-      final stderr = process.stderr.transform(utf8.decoder).join();
+      final stdout = process.stdout
+          .transform(const Utf8Decoder(allowMalformed: true))
+          .join();
+      final stderr = process.stderr
+          .transform(const Utf8Decoder(allowMalformed: true))
+          .join();
       if (stdin != null) {
         process.writeToStdin(stdin);
         await process.closeStdin();

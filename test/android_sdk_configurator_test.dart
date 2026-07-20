@@ -97,6 +97,24 @@ void main() {
     expect(processes.requests.every((request) => request.runInShell), isTrue);
   });
 
+  test('tolerates non-UTF-8 sdkmanager console output', () async {
+    final processes = _RecordingProcessStarter([
+      _CompletedProcess(stdoutBytes: const [0xff, 0xfe, 10]),
+      _CompletedProcess(stdoutBytes: const [0x70, 0x61, 0x63, 0x6b, 0xff]),
+    ]);
+    final configurator = AndroidSdkConfigurator(
+      sdkRoot: r'C:\Managed\Android SDK',
+      jdkRoot: r'C:\Managed\JDK',
+      packages: const ['platform-tools'],
+      processStarter: processes,
+      isWindows: true,
+    );
+
+    await configurator.configure(licensesAccepted: true);
+
+    expect(processes.requests, hasLength(2));
+  });
+
   test('reports license failure and does not install packages', () async {
     final processes = _RecordingProcessStarter([
       _CompletedProcess(
@@ -242,11 +260,13 @@ final class _CompletedProcess implements AndroidSdkProcess {
     this.exitCodeValue = 0,
     this.stdoutText = '',
     this.stderrText = '',
+    this.stdoutBytes,
   });
 
   final int exitCodeValue;
   final String stdoutText;
   final String stderrText;
+  final List<int>? stdoutBytes;
   final StringBuffer _stdin = StringBuffer();
   bool stdinClosed = false;
   bool killed = false;
@@ -254,7 +274,8 @@ final class _CompletedProcess implements AndroidSdkProcess {
   String get stdinText => _stdin.toString();
 
   @override
-  Stream<List<int>> get stdout => Stream.value(utf8.encode(stdoutText));
+  Stream<List<int>> get stdout =>
+      Stream.value(stdoutBytes ?? utf8.encode(stdoutText));
 
   @override
   Stream<List<int>> get stderr => Stream.value(utf8.encode(stderrText));

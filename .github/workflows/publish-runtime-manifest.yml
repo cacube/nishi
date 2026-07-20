@@ -1,0 +1,109 @@
+name: Publish runtime manifest
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing Git tag to publish to, for example v0.1.0
+        required: true
+        type: string
+      manifest:
+        description: Repository-relative path to the runtime manifest
+        required: true
+        default: release/runtime-manifest.json
+        type: string
+      signature:
+        description: Repository-relative path to the detached signature envelope
+        required: true
+        default: release/runtime-manifest.sig.json
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-publish:
+    name: Verify and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      MANIFEST_PATH: ${{ inputs.manifest }}
+      SIGNATURE_PATH: ${{ inputs.signature }}
+      RUNTIME_MANIFEST_PUBLIC_KEY_BASE64: ${{ vars.RUNTIME_MANIFEST_PUBLIC_KEY_BASE64 }}
+      RUNTIME_MANIFEST_KEY_ID: ${{ vars.RUNTIME_MANIFEST_KEY_ID }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up stable Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Require release public key
+        shell: bash
+        run: |
+          if [[ -z "$RUNTIME_MANIFEST_PUBLIC_KEY_BASE64" ]]; then
+            echo "Repository variable RUNTIME_MANIFEST_PUBLIC_KEY_BASE64 is not configured." >&2
+            exit 1
+          fi
+          if [[ -z "$RUNTIME_MANIFEST_KEY_ID" ]]; then
+            echo "Repository variable RUNTIME_MANIFEST_KEY_ID is not configured." >&2
+            exit 1
+          fi
+
+      - name: Validate release inputs
+        shell: bash
+        run: |
+          manifest_real="$(realpath "$MANIFEST_PATH")"
+          signature_real="$(realpath "$SIGNATURE_PATH")"
+
+          case "$manifest_real" in
+            "$GITHUB_WORKSPACE"/*) ;;
+            *) echo "Manifest must be inside the repository workspace." >&2; exit 1 ;;
+          esac
+          case "$signature_real" in
+            "$GITHUB_WORKSPACE"/*) ;;
+            *) echo "Signature must be inside the repository workspace." >&2; exit 1 ;;
+          esac
+          if [[ "$MANIFEST_PATH" == *'#'* || "$SIGNATURE_PATH" == *'#'* ]]; then
+            echo "Release asset paths cannot contain #." >&2
+            exit 1
+          fi
+
+      - name: Verify detached manifest signature
+        shell: bash
+        run: |
+          dart run tool/runtime_manifest_signer.dart verify \
+            --manifest "$MANIFEST_PATH" \
+            --signature "$SIGNATURE_PATH" \
+            --public-key "$RUNTIME_MANIFEST_PUBLIC_KEY_BASE64" \
+            --key-id "$RUNTIME_MANIFEST_KEY_ID"
+
+      - name: Ensure release exists
+        shell: bash
+        run: |
+          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title "$RELEASE_TAG" \
+              --generate-notes
+          fi
+
+      - name: Upload verified manifest assets
+        shell: bash
+        run: |
+          gh release upload "$RELEASE_TAG" \
+            "$MANIFEST_PATH#runtime-manifest.json" \
+            "$SIGNATURE_PATH#runtime-manifest.sig.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber

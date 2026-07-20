@@ -18,10 +18,11 @@ only the signed manifest and its detached signature envelope.
   repository, with mode `0600`. It must never be committed, uploaded to GitHub,
   included in a build, or shared with a clean-machine runner.
 - The default URLs serve only an exact-byte-signed manifest and detached
-  signature published as release assets. Verify those URLs after each
-  publication. Do not describe the clean-machine install matrix as passing
-  until the Windows and macOS install workflow runs have actually completed
-  successfully.
+  signature published as immutable release assets. Verify those URLs after each
+  publication.
+- The first production profile passed install-mode clean-machine verification
+  on Windows 2025 and macOS 15. The evidence is recorded under
+  [Clean-Machine Verification](#clean-machine-verification).
 
 ## Trust Model
 
@@ -164,8 +165,21 @@ update before using the installed tools.
 ## Clean-Machine Verification
 
 The manual `Runtime clean-machine smoke` workflow supports Windows and macOS
-and has `validate`, `download`, and `install` modes. Its existence is not a test
-result. Before declaring a runtime release verified:
+and has `validate`, `download`, and `install` modes.
+
+The first production profile completed these install-mode runs on 2026-07-20:
+
+- [Flutter client toolchain run 29753324985](https://github.com/cacube/nishi/actions/runs/29753324985):
+  Windows 2025 and macOS 15 installed the pinned JDK, Android SDK packages, and
+  Flutter SDK; built Web and Android APK targets; built Windows desktop on
+  Windows; and, after detecting Xcode, built macOS and an unsigned iOS
+  simulator target on macOS.
+- [Gin-Vue-Admin server toolchain run 29755257509](https://github.com/cacube/nishi/actions/runs/29755257509):
+  both hosts installed and version-checked Go, Node.js/npm, and MySQL; initialized
+  MySQL, enabled user-level autostart, and verified the MySQL 8.4.10 protocol
+  handshake on port 3306.
+
+Before declaring a future runtime profile verified:
 
 1. Run install mode for `flutter,jdk,android-sdk` on both hosts with Android
    license acceptance explicitly enabled, then verify Flutter Android and web.

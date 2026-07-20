@@ -37,9 +37,9 @@ The first production manifest exists at
 trusted production Ed25519 public key is embedded in the application. The
 private key is stored outside this repository and must never be committed. The
 default remote URLs serve only a detached-signature-verified copy published as
-GitHub Release assets. Clean-machine Windows/macOS installation verification is
-still pending; the manual GitHub Actions workflow exists, but its install runs
-must not be treated as passed until they have actually completed. See
+GitHub Release assets. Clean Windows 2025 and macOS 15 runners have completed
+the managed Flutter/Android/Web/desktop and Gin-Vue-Admin server installation
+smokes. The recorded workflow runs and the required release procedure are in
 [docs/releasing.md](docs/releasing.md).
 
 Redis is optional for the targeted Gin-Vue-Admin v3.0.0 release because its

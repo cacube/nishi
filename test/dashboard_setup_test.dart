@@ -49,6 +49,22 @@ void main() {
     expect(find.text('需要许可确认'), findsOneWidget);
     expect(find.text('同意并继续'), findsOneWidget);
     expect(actionRuns, 0);
+    var foundMaterial = false;
+    var foundDecoratedBoxBeforeMaterial = false;
+    tester.element(find.byType(CheckboxListTile)).visitAncestorElements((
+      element,
+    ) {
+      if (element.widget is Material) {
+        foundMaterial = true;
+        return false;
+      }
+      if (element.widget is DecoratedBox) {
+        foundDecoratedBoxBeforeMaterial = true;
+      }
+      return true;
+    });
+    expect(foundMaterial, isTrue);
+    expect(foundDecoratedBoxBeforeMaterial, isFalse);
 
     await tester.tap(find.byType(Checkbox));
     await tester.pump();

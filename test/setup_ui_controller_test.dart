@@ -7,6 +7,7 @@ import 'package:dev_environment_manager/src/environment/environment_controller.d
 import 'package:dev_environment_manager/src/install/artifact_installer.dart';
 import 'package:dev_environment_manager/src/manifest_security/remote_manifest_exceptions.dart';
 import 'package:dev_environment_manager/src/manifest_security/remote_manifest_release_configuration.dart';
+import 'package:dev_environment_manager/src/provisioning/runtime_target.dart';
 import 'package:dev_environment_manager/src/provisioning/provisioning_workflow.dart';
 import 'package:dev_environment_manager/src/runtime_manifest/runtime_manifest.dart';
 import 'package:dev_environment_manager/src/setup/setup_orchestrator.dart';
@@ -315,6 +316,10 @@ void main() {
           layout: layout,
           downloads: downloads,
           installer: ArtifactInstaller(layout: layout),
+          target: const RuntimeTarget(
+            platform: RuntimePlatform.macos,
+            architecture: RuntimeArchitecture.arm64,
+          ),
         ),
         releaseConfiguration: RemoteManifestReleaseConfiguration.fromValues(
           signingKeyId: 'test-key',

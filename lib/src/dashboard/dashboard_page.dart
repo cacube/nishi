@@ -450,31 +450,34 @@ class _PreflightPanelState extends State<_PreflightPanel> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (final confirmation in confirmations)
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            controlAffinity: ListTileControlAffinity.leading,
-            value: _accepted.contains(confirmation.id),
-            onChanged: (selected) {
-              setState(() {
-                if (selected ?? false) {
-                  _accepted.add(confirmation.id);
-                } else {
-                  _accepted.remove(confirmation.id);
-                }
-              });
-            },
-            title: Text(confirmation.title),
-            subtitle: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(confirmation.description),
-                if (confirmation.termsUrl case final url?)
-                  TextButton.icon(
-                    onPressed: () => _openExternal(context, url),
-                    icon: const Icon(Icons.open_in_new, size: 16),
-                    label: const Text('查看条款'),
-                  ),
-              ],
+          Material(
+            color: Colors.transparent,
+            child: CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              value: _accepted.contains(confirmation.id),
+              onChanged: (selected) {
+                setState(() {
+                  if (selected ?? false) {
+                    _accepted.add(confirmation.id);
+                  } else {
+                    _accepted.remove(confirmation.id);
+                  }
+                });
+              },
+              title: Text(confirmation.title),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(confirmation.description),
+                  if (confirmation.termsUrl case final url?)
+                    TextButton.icon(
+                      onPressed: () => _openExternal(context, url),
+                      icon: const Icon(Icons.open_in_new, size: 16),
+                      label: const Text('查看条款'),
+                    ),
+                ],
+              ),
             ),
           ),
         Align(

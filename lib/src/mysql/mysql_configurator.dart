@@ -127,6 +127,12 @@ final class MySqlConfigurator {
     _activeProcess?.kill();
   }
 
+  void throwIfCancelled() {
+    if (_cancelRequested) {
+      throw const MySqlConfigurationCancelledException();
+    }
+  }
+
   Future<MySqlConfigurationResult> configure() async {
     _cancelRequested = false;
     await dataDirectory.create(recursive: true);
@@ -156,7 +162,7 @@ final class MySqlConfigurator {
       await dataDirectory.create(recursive: true);
     }
 
-    _throwIfCancelled();
+    throwIfCancelled();
     await initializationMarker.writeAsString(
       DateTime.now().toUtc().toIso8601String(),
       flush: true,
@@ -184,7 +190,7 @@ final class MySqlConfigurator {
         final exitCode = await process.exitCode;
         final output = await stdout;
         final errorOutput = await stderr;
-        _throwIfCancelled();
+        throwIfCancelled();
         if (exitCode != 0) {
           throw MySqlInitializationException(
             exitCode: exitCode,
@@ -197,7 +203,7 @@ final class MySqlConfigurator {
         }
       }
 
-      _throwIfCancelled();
+      throwIfCancelled();
       final result = await _prepareSecureBootstrap(launch, initialized: true);
       if (await marker.exists()) await marker.delete();
       if (await initializationMarker.exists()) {
@@ -250,12 +256,6 @@ final class MySqlConfigurator {
       await dataDirectory.delete(recursive: true);
     }
     await marker.delete();
-  }
-
-  void _throwIfCancelled() {
-    if (_cancelRequested) {
-      throw const MySqlConfigurationCancelledException();
-    }
   }
 
   Future<MySqlConfigurationResult> _prepareSecureBootstrap(

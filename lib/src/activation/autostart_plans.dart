@@ -159,6 +159,9 @@ $programArguments
 enum WindowsAutoStartKind { userTask, systemService }
 
 final class WindowsAutoStartPlan {
+  static const userRunKeyPath =
+      r'HKCU\Software\Microsoft\Windows\CurrentVersion\Run';
+
   static AutoStartPlan userTask({
     required String id,
     required String taskName,
@@ -196,6 +199,43 @@ final class WindowsAutoStartPlan {
       enableCommands: [create],
       updateCommands: [create],
       disableCommands: [disable],
+      uninstallCommands: [remove],
+    );
+  }
+
+  static AutoStartPlan userRunKey({
+    required String id,
+    required String valueName,
+    required String executable,
+    required List<String> arguments,
+    List<ManagedArtifact> artifacts = const [],
+  }) {
+    final commandLine = _windowsCommandLine(executable, arguments);
+    final add = ActivationCommand(
+      executable: 'reg.exe',
+      arguments: [
+        'ADD',
+        userRunKeyPath,
+        '/V',
+        valueName,
+        '/T',
+        'REG_SZ',
+        '/D',
+        commandLine,
+        '/F',
+      ],
+    );
+    final remove = ActivationCommand(
+      executable: 'reg.exe',
+      arguments: ['DELETE', userRunKeyPath, '/V', valueName, '/F'],
+      acceptedExitCodes: const {0, 1},
+    );
+    return AutoStartPlan(
+      id: id,
+      artifacts: artifacts,
+      enableCommands: [add],
+      updateCommands: [add],
+      disableCommands: [remove],
       uninstallCommands: [remove],
     );
   }

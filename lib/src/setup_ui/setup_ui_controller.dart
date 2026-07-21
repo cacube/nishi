@@ -9,6 +9,7 @@ import '../install/artifact_installer.dart';
 import '../manifest_security/remote_manifest_exceptions.dart';
 import '../manifest_security/remote_manifest_release_configuration.dart';
 import '../mysql/mysql_configurator.dart';
+import '../mysql/mysql_service_readiness.dart';
 import '../operation/runtime_operation_coordinator.dart';
 import '../provisioning/provisioning_plan.dart';
 import '../provisioning/provisioning_workflow.dart';
@@ -362,6 +363,7 @@ final class SetupUiController extends ChangeNotifier {
         'MySQL 安装文件无法解压或内容不完整，请重新下载。',
       AutoStartCommandException() when task.definition.id == 'mysql' =>
         'MySQL 已完成初始化，但自动启动失败，请重试。',
+      MySqlServiceStartException(:final message) => message,
       ProcessException() when task.definition.id == 'mysql' =>
         Platform.isWindows
             ? 'MySQL 程序无法启动，请确认 Windows 安全软件未拦截后重试。'

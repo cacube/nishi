@@ -8,6 +8,7 @@ import 'package:dev_environment_manager/src/install/artifact_installer.dart';
 import 'package:dev_environment_manager/src/manifest_security/remote_manifest_exceptions.dart';
 import 'package:dev_environment_manager/src/manifest_security/remote_manifest_release_configuration.dart';
 import 'package:dev_environment_manager/src/mysql/mysql_configurator.dart';
+import 'package:dev_environment_manager/src/mysql/mysql_service_readiness.dart';
 import 'package:dev_environment_manager/src/operation/runtime_operation_coordinator.dart';
 import 'package:dev_environment_manager/src/provisioning/runtime_target.dart';
 import 'package:dev_environment_manager/src/provisioning/provisioning_workflow.dart';
@@ -218,6 +219,30 @@ void main() {
 
       expect(controller.state.tasks.single.message, contains('退出码 1'));
       expect(controller.state.tasks.single.message, contains('not writable'));
+    },
+  );
+
+  test(
+    'shows the MySQL readiness failure reported by the service probe',
+    () async {
+      final controller = SetupUiController(
+        prepare: () async => SetupOrchestrator(
+          tasks: const [SetupTaskDefinition(id: 'mysql', label: 'MySQL')],
+          actions: {
+            'mysql': _CallbackAction(
+              () => throw const MySqlServiceStartException(
+                'MySQL 未能在端口 3306 启动：连接失败',
+              ),
+            ),
+          },
+        ),
+        rescanEnvironment: () async {},
+      );
+
+      await controller.start();
+
+      expect(controller.state.phase, SetupUiPhase.failed);
+      expect(controller.state.tasks.single.message, 'MySQL 未能在端口 3306 启动：连接失败');
     },
   );
 

@@ -481,6 +481,7 @@ void main() {
             message: probeAttempts == 1 ? 'not ready' : 'ready',
           );
         },
+        managedInstanceProbe: (_) async => true,
         retryDelay: Duration.zero,
         maximumProbeAttempts: 2,
       );
@@ -502,6 +503,7 @@ void main() {
         version: '8.4.10',
         message: 'ready',
       ),
+      managedInstanceProbe: (_) async => true,
       retryDelay: Duration.zero,
     );
 

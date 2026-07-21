@@ -11,6 +11,8 @@ import '../environment/environment_scanner.dart';
 import '../install/artifact_installer.dart';
 import '../runtime_manifest/runtime_manifest.dart';
 import '../mysql/mysql_configurator.dart';
+import '../mysql/mysql_service_readiness.dart';
+import '../mysql/windows_mysql_autostart.dart';
 import '../setup/license_acceptance.dart';
 import '../setup/setup_orchestrator.dart';
 import '../setup/setup_task.dart';
@@ -187,6 +189,13 @@ final class ProvisioningWorkflow {
     if (service?.startAutomatically ?? false) {
       onProgress(0.65, '正在启动 MySQL 服务');
       await _enableMySqlAutoStart(result.launchConfiguration);
+      onProgress(0.8, '正在确认 MySQL 服务');
+      await MySqlServiceReadiness().wait(
+        port: service!.defaultPort,
+        expectedVersion: component.version,
+        launch: result.launchConfiguration,
+        throwIfCancelled: configurator.throwIfCancelled,
+      );
     }
     onProgress(1, 'MySQL 配置完成');
   }
@@ -227,28 +236,10 @@ final class ProvisioningWorkflow {
       return;
     }
 
-    final plan = WindowsAutoStartPlan.userTask(
-      id: 'mysql',
-      taskName: r'DevEnvironmentManager\MySQL',
-      executable: launch.executable,
-      arguments: launch.serverArguments,
-    );
-    await coordinator.enable(plan);
-    final start = await processes.run(
-      const ActivationCommand(
-        executable: 'schtasks.exe',
-        arguments: ['/Run', '/TN', r'DevEnvironmentManager\MySQL'],
-      ),
-    );
-    if (start.exitCode != 0) {
-      throw AutoStartCommandException(
-        const ActivationCommand(
-          executable: 'schtasks.exe',
-          arguments: ['/Run', '/TN', r'DevEnvironmentManager\MySQL'],
-        ),
-        start,
-      );
-    }
+    await const WindowsMySqlAutoStart(
+      files: files,
+      processes: processes,
+    ).enable(launch);
   }
 }
 

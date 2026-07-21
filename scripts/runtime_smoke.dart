@@ -9,6 +9,8 @@ import 'package:dev_environment_manager/src/compatibility/version_output_parser.
 import 'package:dev_environment_manager/src/download/download_manager.dart';
 import 'package:dev_environment_manager/src/install/artifact_installer.dart';
 import 'package:dev_environment_manager/src/mysql/mysql_configurator.dart';
+import 'package:dev_environment_manager/src/mysql/mysql_service_readiness.dart';
+import 'package:dev_environment_manager/src/mysql/windows_mysql_autostart.dart';
 import 'package:dev_environment_manager/src/provisioning/provisioning_plan.dart';
 import 'package:dev_environment_manager/src/provisioning/runtime_target.dart';
 import 'package:dev_environment_manager/src/runtime_manifest/runtime_manifest.dart';
@@ -579,15 +581,18 @@ final class RuntimeSmokeMySqlLifecycle {
     required RuntimeSmokeMySqlConfigure configure,
     required RuntimeSmokeMySqlAutoStart enableAutoStart,
     required RuntimeSmokeMySqlProbe probe,
+    MySqlManagedInstanceProbe? managedInstanceProbe,
     this.retryDelay = const Duration(seconds: 2),
     this.maximumProbeAttempts = 30,
   }) : _configure = configure,
        _enableAutoStart = enableAutoStart,
-       _probe = probe;
+       _probe = probe,
+       _managedInstanceProbe = managedInstanceProbe;
 
   final RuntimeSmokeMySqlConfigure _configure;
   final RuntimeSmokeMySqlAutoStart _enableAutoStart;
   final RuntimeSmokeMySqlProbe _probe;
+  final MySqlManagedInstanceProbe? _managedInstanceProbe;
   final Duration retryDelay;
   final int maximumProbeAttempts;
 
@@ -611,27 +616,20 @@ final class RuntimeSmokeMySqlLifecycle {
 
     final configuration = await _configure();
     await _enableAutoStart(configuration.launchConfiguration);
-    ServiceProbeResult? lastResult;
-    for (var attempt = 1; attempt <= maximumProbeAttempts; attempt++) {
-      lastResult = await _probe(service.defaultPort);
-      if (lastResult.identified) {
-        final version = lastResult.version;
-        if (version == null || !version.startsWith(component.version)) {
-          throw RuntimeSmokeException(
-            'MySQL protocol expected version ${component.version} but '
-            'reported ${version ?? 'none'}',
-          );
-        }
-        return lastResult;
-      }
-      if (attempt < maximumProbeAttempts) {
-        await Future<void>.delayed(retryDelay);
-      }
+    try {
+      return await MySqlServiceReadiness(
+        probe: _probe,
+        managedInstanceProbe: _managedInstanceProbe,
+        retryDelay: retryDelay,
+        maximumAttempts: maximumProbeAttempts,
+      ).wait(
+        port: service.defaultPort,
+        expectedVersion: component.version,
+        launch: configuration.launchConfiguration,
+      );
+    } on MySqlServiceStartException catch (error) {
+      throw RuntimeSmokeException(error.message);
     }
-    throw RuntimeSmokeException(
-      'MySQL did not become ready on 127.0.0.1:${service.defaultPort}: '
-      '${lastResult?.message ?? 'no probe result'}',
-    );
   }
 }
 
@@ -889,25 +887,10 @@ Future<void> _enableMySqlAutoStart(
     return;
   }
 
-  const taskName = r'DevEnvironmentManager\MySQL';
-  final plan = WindowsAutoStartPlan.userTask(
-    id: 'mysql',
-    taskName: taskName,
-    executable: configuration.executable,
-    arguments: configuration.serverArguments,
-  );
-  await coordinator.enable(plan);
-  final start = await processes.run(
-    const ActivationCommand(
-      executable: 'schtasks.exe',
-      arguments: ['/Run', '/TN', taskName],
-    ),
-  );
-  if (start.exitCode != 0) {
-    throw RuntimeSmokeException(
-      'Could not start the Windows MySQL user task: ${start.stderr}',
-    );
-  }
+  await const WindowsMySqlAutoStart(
+    files: files,
+    processes: processes,
+  ).enable(configuration);
 }
 
 Map<String, String> _parseOptions(List<String> arguments) {

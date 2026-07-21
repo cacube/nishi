@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.cacube" "\0"
-            VALUE "FileDescription", "Dev Environment" "\0"
+            VALUE "FileDescription", "lc" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "dev_environment_manager" "\0"
+            VALUE "InternalName", "lc" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.cacube. All rights reserved." "\0"
-            VALUE "OriginalFilename", "dev_environment_manager.exe" "\0"
-            VALUE "ProductName", "Dev Environment" "\0"
+            VALUE "OriginalFilename", "lc.exe" "\0"
+            VALUE "ProductName", "lc" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

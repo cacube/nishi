@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'app_brand.dart';
 import 'dashboard/dashboard_page.dart';
 
 class DevEnvironmentApp extends StatelessWidget {
@@ -16,7 +17,7 @@ class DevEnvironmentApp extends StatelessWidget {
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: '开发环境',
+      title: applicationName,
       theme: ThemeData(
         colorScheme: scheme,
         scaffoldBackgroundColor: scheme.surface,

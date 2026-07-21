@@ -1,6 +1,6 @@
 # Release and Runtime Manifest Signing
 
-Nishi downloads runtime metadata from GitHub Releases. Runtime binaries remain
+lc downloads runtime metadata from GitHub Releases. Runtime binaries remain
 on vendor HTTPS endpoints or reviewed exact-byte China mirrors; GitHub Releases
 contains only the signed manifest and its detached signature envelope.
 
@@ -156,14 +156,14 @@ optional. Gin-Vue-Admin v3.0.0 defaults `use-redis` to `false`, so Redis does
 not block readiness for the supported server profile.
 
 - macOS Redis is external because Redis does not publish an official macOS
-  binary that Nishi can pin and verify.
+  binary that lc can pin and verify.
 - Windows Memurai is external because the Developer MSI had no vendor-published
-  SHA-256 and returned HTTP 403 during release verification. Nishi must not
+  SHA-256 and returned HTTP 403 during release verification. lc must not
   invent a checksum or silently mirror an unverified installer.
 
 ## Post-Install Process Restart
 
-Nishi persists the managed toolchain variables for future user processes and
+lc persists the managed toolchain variables for future user processes and
 updates the active macOS launchd or Windows user environment. Already-running
 applications keep the environment with which they started. Completely quit and
 reopen Codex and every Terminal application after setup or an environment

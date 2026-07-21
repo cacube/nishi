@@ -7,7 +7,7 @@ class MainFlutterWindow: NSWindow {
     let windowFrame = self.frame
     self.contentViewController = flutterViewController
     self.setFrame(windowFrame, display: true)
-    self.title = "开发环境"
+    self.title = "lc"
 
     RegisterGeneratedPlugins(registry: flutterViewController)
 

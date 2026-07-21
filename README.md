@@ -1,4 +1,4 @@
-# Development Environment Manager
+# lc
 
 A Flutter desktop application that prepares and maintains a zero-knowledge development environment for Flutter and the official stable Gin-Vue-Admin stack.
 
@@ -51,13 +51,13 @@ the managed Flutter/Android/Web/desktop and Gin-Vue-Admin server installation
 smokes. The recorded workflow runs and the required release procedure are in
 [docs/releasing.md](docs/releasing.md).
 
-Nishi application updates currently open the project's GitHub Releases page;
+lc application updates currently open the project's GitHub Releases page;
 the application does not replace its own desktop bundle in place. Automatic
 component downloads only populate the verified cache for already installed
 components. Installation remains an explicit user action.
 
 Redis is optional for the targeted Gin-Vue-Admin v3.0.0 release because its
-default configuration sets `use-redis` to `false`. Nishi does not currently
+default configuration sets `use-redis` to `false`. lc does not currently
 install Redis on macOS because Redis does not publish an official macOS binary.
 Memurai remains external on Windows because the vendor MSI had no published
 SHA-256 and returned HTTP 403 during release verification.

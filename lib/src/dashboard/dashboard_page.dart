@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../app_brand.dart';
 import '../environment/environment_component.dart';
 import '../environment/environment_controller.dart';
 import '../install/artifact_installer.dart';
@@ -480,7 +481,7 @@ class _UpdateBody extends StatelessWidget {
                 ),
               const SizedBox(height: 20),
               _SettingsSection(
-                title: 'Nishi 软件',
+                title: '$applicationName 软件',
                 icon: Icons.apps,
                 children: [
                   ListTile(

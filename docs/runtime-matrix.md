@@ -1,6 +1,6 @@
 # Runtime Compatibility Matrix
 
-The first Nishi runtime profile targets the official stable
+The first lc runtime profile targets the official stable
 `flipped-aurora/gin-vue-admin` v3.0.0 release (commit
 `a890e99f7f98029cdef19ffcbb48d3f9cc5e6259`). It does not download or create a
 Gin-Vue-Admin project; it only prepares compatible development runtimes.
@@ -24,7 +24,7 @@ profile because they are large and require host virtualization checks.
 
 Every managed artifact in `release/runtime-manifest.json` keeps the vendor's
 official HTTPS endpoint first and has a pinned SHA-256 digest. Reviewed China
-mirror URLs are optional fallbacks and must serve the exact same bytes. Nishi
+mirror URLs are optional fallbacks and must serve the exact same bytes. lc
 discards partial data when changing sources and verifies the same SHA-256 before
 installation. Components without a verified exact-byte mirror remain
 official-only. The signed release manifest is the source of truth for updates.
@@ -34,4 +34,4 @@ build-tools, and platform-tools installation is delegated to the pinned Google
 `sdkmanager`: it tries Google's international repository first and then the
 Google China repository from the signed manifest. Those dynamic repository
 packages use the checksums supplied by Google's repository metadata and are not
-claimed as separate Nishi SHA-256-pinned artifacts.
+claimed as separate lc SHA-256-pinned artifacts.

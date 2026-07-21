@@ -9,8 +9,6 @@ version=''
 output_directory="$repository_root/build/installers"
 skip_flutter_build=false
 architecture=native
-dart_arm64=${LC_DART_ARM64:-}
-dart_x64=${LC_DART_X64:-}
 
 usage() {
   cat <<'EOF'
@@ -23,13 +21,7 @@ Options:
                        Reuse an existing macOS release application.
   --architecture VALUE
                        native (default), arm64, x64, or universal.
-  --dart-arm64 PATH    arm64 Dart executable used for AOT compilation.
-  --dart-x64 PATH      x64 Dart executable used for AOT compilation.
   -h, --help           Show this help.
-
-The Dart SDK only ships an AOT backend for its own macOS architecture.
-Universal output therefore requires both SDK architectures. LC_DART_ARM64 and
-LC_DART_X64 provide the same values as the corresponding command options.
 EOF
 }
 
@@ -52,16 +44,6 @@ while [ "$#" -gt 0 ]; do
     --architecture)
       [ "$#" -ge 2 ] || { echo '--architecture requires a value' >&2; exit 64; }
       architecture=$2
-      shift 2
-      ;;
-    --dart-arm64)
-      [ "$#" -ge 2 ] || { echo '--dart-arm64 requires a value' >&2; exit 64; }
-      dart_arm64=$2
-      shift 2
-      ;;
-    --dart-x64)
-      [ "$#" -ge 2 ] || { echo '--dart-x64 requires a value' >&2; exit 64; }
-      dart_x64=$2
       shift 2
       ;;
     -h|--help)
@@ -106,34 +88,6 @@ case "$version" in
     ;;
 esac
 
-if [ ! -f bin/lc.dart ]; then
-  echo 'bin/lc.dart is missing. Implement the CLI before building the installer.' >&2
-  exit 1
-fi
-
-host_dart=$(command -v dart || true)
-if [ -n "$host_dart" ]; then
-  dart_platform=$("$host_dart" --version 2>&1 || true)
-  case "$dart_platform" in
-    *'macos_arm64'*)
-      if [ -z "$dart_arm64" ]; then dart_arm64=$host_dart; fi
-      ;;
-    *'macos_x64'*)
-      if [ -z "$dart_x64" ]; then dart_x64=$host_dart; fi
-      ;;
-  esac
-fi
-if { [ "$architecture" = arm64 ] || [ "$architecture" = universal ]; } &&
-   { [ -z "$dart_arm64" ] || [ ! -x "$dart_arm64" ]; }; then
-  echo 'An arm64 Dart SDK is required. Set LC_DART_ARM64 or pass --dart-arm64.' >&2
-  exit 1
-fi
-if { [ "$architecture" = x64 ] || [ "$architecture" = universal ]; } &&
-   { [ -z "$dart_x64" ] || [ ! -x "$dart_x64" ]; }; then
-  echo 'An x64 Dart SDK is required. Set LC_DART_X64 or pass --dart-x64.' >&2
-  exit 1
-fi
-
 if [ "$skip_flutter_build" = false ]; then
   flutter pub get --enforce-lockfile
   flutter build macos --release --build-name "$version"
@@ -172,56 +126,15 @@ fi
 staging="$repository_root/build/packaging/macos"
 payload="$staging/payload"
 package_scripts="$staging/package-scripts"
-cli_staging="$staging/cli"
 /bin/rm -rf "$staging"
 /bin/mkdir -p \
   "$payload/Applications" \
-  "$payload/Library/Application Support/DevEnvironmentManager/bin" \
   "$package_scripts" \
-  "$cli_staging" \
   "$output_directory"
 
-installed_cli="$payload/Library/Application Support/DevEnvironmentManager/bin/lc"
-if [ "$architecture" = arm64 ] || [ "$architecture" = universal ]; then
-  "$dart_arm64" compile exe --target-os macos --target-arch arm64 \
-    --output "$cli_staging/lc-arm64" bin/lc.dart
-fi
-if [ "$architecture" = x64 ] || [ "$architecture" = universal ]; then
-  "$dart_x64" compile exe --target-os macos --target-arch x64 \
-    --output "$cli_staging/lc-x64" bin/lc.dart
-fi
-case "$architecture" in
-  arm64)
-    /bin/cp "$cli_staging/lc-arm64" "$installed_cli"
-    cli_architectures='arm64'
-    ;;
-  x64)
-    /bin/cp "$cli_staging/lc-x64" "$installed_cli"
-    cli_architectures='x86_64'
-    ;;
-  universal)
-    /usr/bin/lipo -create \
-      "$cli_staging/lc-arm64" \
-      "$cli_staging/lc-x64" \
-      -output "$installed_cli"
-    cli_architectures='arm64 x86_64'
-    ;;
-esac
-# shellcheck disable=SC2086
-/usr/bin/lipo "$installed_cli" -verify_arch $cli_architectures
-if [ "$architecture" = "$native_architecture" ] ||
-   [ "$architecture" = universal ]; then
-  "$installed_cli" --version >/dev/null
-fi
-
 /usr/bin/ditto "$application" "$payload/Applications/lc.app"
-/bin/cp packaging/macos/lc-uninstall \
-  "$payload/Library/Application Support/DevEnvironmentManager/bin/lc-uninstall"
 /bin/cp packaging/macos/scripts/postinstall "$package_scripts/postinstall"
-/bin/chmod 755 \
-  "$payload/Library/Application Support/DevEnvironmentManager/bin/lc" \
-  "$payload/Library/Application Support/DevEnvironmentManager/bin/lc-uninstall" \
-  "$package_scripts/postinstall"
+/bin/chmod 755 "$package_scripts/postinstall"
 
 component_package="$staging/lc-component.pkg"
 /usr/bin/pkgbuild \

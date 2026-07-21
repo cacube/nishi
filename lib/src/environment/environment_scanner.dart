@@ -414,7 +414,6 @@ class EnvironmentScanner {
     final managedExtras = <String>[];
     final runtimeLayout = layout;
     if (runtimeLayout != null) {
-      managedExtras.add(runtimeLayout.bin.path);
       final versions = runtimeLayout.readActiveVersionsSync();
       String? rootFor(String id) {
         final version = versions[id];

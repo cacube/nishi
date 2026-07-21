@@ -22,7 +22,6 @@ void main() {
       layout.componentStaging('flutter', '3.41.4').path,
       endsWith(_path('runtimes/flutter/3.41.4.staging')),
     );
-    expect(layout.bin.path, endsWith(_path('DevEnvironmentManager/bin')));
   });
 
   test('builds a user-scoped Windows layout', () {
@@ -33,7 +32,6 @@ void main() {
 
     expect(layout.root.path, contains('DevEnvironmentManager'));
     expect(layout.cache.path, endsWith(_path('DevEnvironmentManager/cache')));
-    expect(layout.bin.path, endsWith(_path('DevEnvironmentManager/bin')));
   });
 
   test('rejects path traversal in component and version names', () {

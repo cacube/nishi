@@ -37,80 +37,53 @@ case "$target_home" in
 esac
 
 support="$target_home/Library/Application Support/DevEnvironmentManager"
-cli_bin="$support/bin"
+legacy_cli_bin="$support/bin"
 path_script="$support/lc-path.sh"
 begin_marker='# >>> lc CLI >>>'
 end_marker='# <<< lc CLI <<<'
 
-/bin/mkdir -p "$cli_bin"
-/bin/chmod 755 "$cli_bin/lc" "$cli_bin/lc-uninstall" 2>/dev/null || true
-
-/bin/cat > "$path_script" <<'EOF'
-lc_cli_bin="$HOME/Library/Application Support/DevEnvironmentManager/bin"
-case ":${PATH:-}:" in
-  *":$lc_cli_bin:"*) ;;
-  *) export PATH="$lc_cli_bin${PATH:+:$PATH}" ;;
-esac
-unset lc_cli_bin
-EOF
-/bin/chmod 644 "$path_script"
-
-install_profile_hook() {
+remove_legacy_profile_hook() {
   profile=$1
-  if [ -f "$profile" ] && /usr/bin/grep -Fq "$begin_marker" "$profile"; then
-    return
-  fi
-  was_missing=false
-  if [ ! -e "$profile" ]; then
-    was_missing=true
-  fi
-  {
-    if [ -s "$profile" ]; then /bin/echo; fi
-    /bin/echo "$begin_marker"
-    /bin/echo '[ -f "$HOME/Library/Application Support/DevEnvironmentManager/lc-path.sh" ] && . "$HOME/Library/Application Support/DevEnvironmentManager/lc-path.sh"'
-    /bin/echo "$end_marker"
-  } >> "$profile"
-  if [ "$was_missing" = true ]; then
-    /bin/chmod 644 "$profile"
-  fi
+  [ -f "$profile" ] || return 0
+  /usr/bin/grep -Fq "$begin_marker" "$profile" || return 0
+  temporary="$profile.lc-migration.$$"
+  /usr/bin/awk -v begin="$begin_marker" -v end="$end_marker" '
+    $0 == begin { skipping = 1; next }
+    $0 == end { skipping = 0; next }
+    !skipping { print }
+  ' "$profile" > "$temporary"
+  /bin/cat "$temporary" > "$profile"
+  /bin/rm -f "$temporary"
 }
 
-install_profile_hook "$target_home/.zprofile"
-install_profile_hook "$target_home/.bash_profile"
+remove_legacy_profile_hook "$target_home/.zprofile"
+remove_legacy_profile_hook "$target_home/.bash_profile"
 
 owner=$(/usr/bin/stat -f '%Su' "$target_home")
-group=$(/usr/bin/stat -f '%Sg' "$target_home")
-/usr/sbin/chown -R "$owner:$group" "$cli_bin" "$path_script" 2>/dev/null || true
-for profile in "$target_home/.zprofile" "$target_home/.bash_profile"; do
-  /usr/sbin/chown "$owner:$group" "$profile" 2>/dev/null || true
-done
-
-current_path=''
 user_id=$(/usr/bin/id -u "$owner" 2>/dev/null || true)
 if [ -n "$user_id" ]; then
   if [ "$(/usr/bin/id -u)" -eq 0 ]; then
     current_path=$(/bin/launchctl asuser "$user_id" /usr/bin/sudo -u "$owner" \
       /bin/launchctl getenv PATH 2>/dev/null || true)
-    if [ -z "$current_path" ]; then
-      current_path='/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
-    fi
-    case ":$current_path:" in
-      *":$cli_bin:"*) ;;
-      *) /bin/launchctl asuser "$user_id" /usr/bin/sudo -u "$owner" \
-           /bin/launchctl setenv PATH "$cli_bin${current_path:+:$current_path}" \
-           >/dev/null 2>&1 || true ;;
-    esac
   else
     current_path=$(/bin/launchctl getenv PATH 2>/dev/null || true)
-    if [ -z "$current_path" ]; then
-      current_path='/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
+  fi
+  if [ -n "${current_path:-}" ]; then
+    updated_path=$(/bin/echo "$current_path" | /usr/bin/awk -v RS=: -v ORS=: \
+      -v remove="$legacy_cli_bin" '$0 != remove && $0 != "" { print }' |
+      /usr/bin/sed 's/:$//')
+    if [ "$updated_path" != "$current_path" ]; then
+      if [ "$(/usr/bin/id -u)" -eq 0 ]; then
+        /bin/launchctl asuser "$user_id" /usr/bin/sudo -u "$owner" \
+          /bin/launchctl setenv PATH "$updated_path" >/dev/null 2>&1 || true
+      else
+        /bin/launchctl setenv PATH "$updated_path" >/dev/null 2>&1 || true
+      fi
     fi
-    case ":$current_path:" in
-      *":$cli_bin:"*) ;;
-      *) /bin/launchctl setenv PATH "$cli_bin${current_path:+:$current_path}" \
-           >/dev/null 2>&1 || true ;;
-    esac
   fi
 fi
+
+/bin/rm -f "$legacy_cli_bin/lc" "$legacy_cli_bin/lc-uninstall" "$path_script"
+/bin/rmdir "$legacy_cli_bin" 2>/dev/null || true
 
 exit 0

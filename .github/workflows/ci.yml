@@ -63,7 +63,7 @@ jobs:
       - name: Build macOS release
         run: flutter build macos --release
 
-      - name: Build joint macOS app and CLI installer
+      - name: Build macOS app installer
         run: scripts/build_macos_installer.sh --skip-flutter-build
 
       - name: Upload macOS installer
@@ -101,14 +101,23 @@ jobs:
         shell: pwsh
         run: choco install innosetup --yes --no-progress
 
-      - name: Build joint Windows app and CLI installer
+      - name: Build Windows app installer
         shell: pwsh
         run: .\scripts\build_windows_installer.ps1 -SkipFlutterBuild
 
-      - name: Smoke install and run CLI
+      - name: Smoke install app-only package
         shell: pwsh
         run: |
           $installer = Resolve-Path 'build\installers\lc-windows-x64-setup.exe'
+          $legacyDir = Join-Path $env:LOCALAPPDATA 'DevEnvironmentManager\bin'
+          New-Item -ItemType Directory -Force -Path $legacyDir | Out-Null
+          Set-Content -Path (Join-Path $legacyDir 'lc.exe') -Value 'legacy'
+          $oldUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          [Environment]::SetEnvironmentVariable(
+            'Path',
+            "$legacyDir;$oldUserPath",
+            'User'
+          )
           $process = Start-Process $installer -Wait -PassThru -ArgumentList @(
             '/VERYSILENT',
             '/SUPPRESSMSGBOXES',
@@ -117,9 +126,14 @@ jobs:
           if ($process.ExitCode -ne 0) {
             throw "Installer failed with exit code $($process.ExitCode)."
           }
-          $cli = Join-Path $env:LOCALAPPDATA 'DevEnvironmentManager\bin\lc.exe'
-          & $cli --version
-          if ($LASTEXITCODE -ne 0) { throw 'Installed lc CLI smoke failed.' }
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\lc\lc.exe'
+          if (-not (Test-Path $app)) { throw 'Installed lc application is missing.' }
+          $legacyCli = Join-Path $env:LOCALAPPDATA 'DevEnvironmentManager\bin\lc.exe'
+          if (Test-Path $legacyCli) { throw 'The app-only installer left a CLI executable.' }
+          $newUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (($newUserPath -split ';') -contains $legacyDir) {
+            throw 'The app-only installer left the legacy CLI PATH entry.'
+          }
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

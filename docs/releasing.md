@@ -149,11 +149,10 @@ Use the same four defines for Windows builds. A public key supplied through a
 `dart-define` becomes part of the application binary; this is expected and does
 not require a GitHub Secret. Never pass the private key through a `dart-define`.
 
-## Desktop Application and CLI Installers
+## Desktop Application Installers
 
-The desktop runner and standalone CLI are separate executables. Build scripts
-compile `bin/lc.dart` as a console executable and place it in the same installer
-under the user-scoped managed `bin` directory.
+The installers contain only the Flutter desktop application. They do not add a
+command to `PATH` or install executables under the managed runtime directory.
 
 Build the native macOS package on an arm64 or x64 Mac:
 
@@ -161,13 +160,10 @@ Build the native macOS package on an arm64 or x64 Mac:
 scripts/build_macos_installer.sh
 ```
 
-This produces `build/installers/lc-macos-<architecture>.pkg`. A universal CLI
-cannot be cross-compiled by one Dart SDK architecture. For a universal package,
-provide matching arm64 and x64 Dart executables:
+This produces `build/installers/lc-macos-<architecture>.pkg`. To build a
+universal package, first produce a universal Flutter application and run:
 
 ```sh
-LC_DART_ARM64=/path/to/arm64/dart \
-LC_DART_X64=/path/to/x64/dart \
 scripts/build_macos_installer.sh --architecture universal
 ```
 
@@ -177,11 +173,12 @@ Build the Windows package from a Windows host with Inno Setup 6 installed:
 .\scripts\build_windows_installer.ps1
 ```
 
-Before publishing, install into a clean current-user profile, open a new
-terminal, verify `lc --version`, and verify uninstall removes only the GUI, CLI,
-and its exact `PATH` entry while retaining runtimes, data, cache, and settings.
-Private unsigned packages show operating-system trust warnings; signing and
-notarization are still required before general distribution.
+Before publishing, install into a clean current-user profile and verify that the
+desktop application launches without creating a CLI or adding an application
+directory to `PATH`. Upgrading from the earlier joint package must remove its
+legacy CLI and exact PATH entry while retaining runtimes, data, cache, and
+settings. Private unsigned packages show operating-system trust warnings;
+signing and notarization are still required before general distribution.
 
 ## Runtime Provider Limits
 

@@ -3,8 +3,8 @@
 The first lc runtime profile targets the official stable
 `flipped-aurora/gin-vue-admin` v3.0.0 release (commit
 `a890e99f7f98029cdef19ffcbb48d3f9cc5e6259`). The desktop application prepares
-compatible development runtimes, and the separately compiled `lc init` CLI
-downloads and verifies this exact source when creating a project.
+compatible development runtimes for projects that use this stable release. It
+does not download project source or provide project-generation commands.
 
 | Component | Pinned version | Provisioning | Notes |
 | --- | --- | --- | --- |

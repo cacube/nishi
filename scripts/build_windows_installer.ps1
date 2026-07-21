@@ -24,10 +24,6 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 }
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 
-if (-not (Test-Path (Join-Path $RepositoryRoot 'bin\lc.dart'))) {
-  throw 'bin\lc.dart is missing. Implement the CLI before building the installer.'
-}
-
 if (-not $SkipFlutterBuild) {
   flutter pub get --enforce-lockfile
   if ($LASTEXITCODE -ne 0) { throw 'flutter pub get failed.' }
@@ -39,14 +35,6 @@ $GuiSource = Join-Path $RepositoryRoot 'build\windows\x64\runner\Release'
 if (-not (Test-Path (Join-Path $GuiSource 'lc.exe'))) {
   throw "Windows release output was not found at $GuiSource."
 }
-
-$CliStagingDirectory = Join-Path $RepositoryRoot 'build\packaging\windows'
-New-Item -ItemType Directory -Force -Path $CliStagingDirectory | Out-Null
-$CliSource = Join-Path $CliStagingDirectory 'lc-cli.exe'
-dart compile exe --target-os windows --target-arch x64 --output $CliSource (Join-Path $RepositoryRoot 'bin\lc.dart')
-if ($LASTEXITCODE -ne 0) { throw 'Dart CLI compilation failed.' }
-& $CliSource --version
-if ($LASTEXITCODE -ne 0) { throw 'The compiled lc CLI failed its version smoke test.' }
 
 if ([string]::IsNullOrWhiteSpace($InnoSetupCompiler)) {
   if (-not [string]::IsNullOrWhiteSpace($env:INNO_SETUP_COMPILER)) {
@@ -69,7 +57,6 @@ $InstallerDefinition = Join-Path $RepositoryRoot 'packaging\windows\lc.iss'
 $Arguments = @(
   "/DAppVersion=$Version",
   "/DAppSource=$GuiSource",
-  "/DCliSource=$CliSource",
   "/DOutputDir=$OutputDirectory",
   $InstallerDefinition
 )

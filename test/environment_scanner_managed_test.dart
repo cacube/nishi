@@ -39,7 +39,6 @@ void main() {
     expect(
       environment['PATH'],
       allOf(
-        contains(layout.bin.path),
         contains('${layout.componentVersion('flutter', '3.44.6').path}/bin'),
         contains(
           '${layout.componentVersion('android-sdk', '36.0.0').path}/platform-tools',

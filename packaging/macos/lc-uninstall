@@ -1,0 +1,54 @@
+#!/bin/sh
+set -eu
+
+home=${HOME:-}
+case "$home" in
+  ""|"/")
+    /bin/echo 'Unable to determine the current user home directory.' >&2
+    exit 1
+    ;;
+esac
+
+app="$home/Applications/lc.app"
+support="$home/Library/Application Support/DevEnvironmentManager"
+cli_bin="$support/bin"
+begin_marker='# >>> lc CLI >>>'
+end_marker='# <<< lc CLI <<<'
+
+remove_profile_hook() {
+  profile=$1
+  [ -f "$profile" ] || return 0
+  /usr/bin/grep -Fq "$begin_marker" "$profile" || return 0
+  temporary="$profile.lc-uninstall.$$"
+  /usr/bin/awk -v begin="$begin_marker" -v end="$end_marker" '
+    $0 == begin { skipping = 1; next }
+    $0 == end { skipping = 0; next }
+    !skipping { print }
+  ' "$profile" > "$temporary"
+  /bin/cat "$temporary" > "$profile"
+  /bin/rm -f "$temporary"
+}
+
+remove_profile_hook "$home/.zprofile"
+remove_profile_hook "$home/.bash_profile"
+
+current_path=$(/bin/launchctl getenv PATH 2>/dev/null || true)
+if [ -n "$current_path" ]; then
+  updated_path=$(/bin/echo "$current_path" | /usr/bin/awk -v RS=: -v ORS=: \
+    -v remove="$cli_bin" '$0 != remove && $0 != "" { print }' | /usr/bin/sed 's/:$//')
+  if [ "$updated_path" != "$current_path" ]; then
+    /bin/launchctl setenv PATH "$updated_path" >/dev/null 2>&1 || true
+  fi
+fi
+
+# Only package-owned files are removed. Managed runtimes, databases, cache,
+# settings, logs, and active version state deliberately remain in support.
+if [ -d "$app" ]; then
+  /bin/rm -rf "$app"
+fi
+/bin/rm -f "$cli_bin/lc" "$support/lc-path.sh"
+/bin/rm -f "$cli_bin/lc-uninstall"
+/bin/rmdir "$cli_bin" 2>/dev/null || true
+/bin/rmdir "$support" 2>/dev/null || true
+
+/bin/echo 'lc application and CLI were removed. Managed development data was preserved.'

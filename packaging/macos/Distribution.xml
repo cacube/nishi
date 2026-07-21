@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+  <title>lc</title>
+  <organization>com.cacube</organization>
+  <domains enable_localSystem="false" enable_currentUserHome="true" enable_anywhere="false"/>
+  <options customize="never" hostArchitectures="__LC_HOST_ARCHITECTURES__"/>
+  <choices-outline>
+    <line choice="lc"/>
+  </choices-outline>
+  <choice id="lc" visible="false" title="lc">
+    <pkg-ref id="com.cacube.lc.user"/>
+  </choice>
+  <pkg-ref id="com.cacube.lc.user" version="__LC_VERSION__">lc-component.pkg</pkg-ref>
+</installer-gui-script>

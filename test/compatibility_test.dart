@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dev_environment_manager/src/compatibility/compatibility_requirement.dart';
+import 'package:dev_environment_manager/src/compatibility/gin_vue_admin_compatibility.dart';
 import 'package:dev_environment_manager/src/compatibility/service_probe.dart';
 import 'package:dev_environment_manager/src/compatibility/software_version.dart';
 import 'package:dev_environment_manager/src/compatibility/version_output_parser.dart';
@@ -102,6 +103,35 @@ void main() {
       CompatibilityStatus.outdated,
     );
     expect(requirement.evaluate(null), CompatibilityStatus.unknown);
+  });
+
+  test('Gin-Vue-Admin v3 accepts only its actual Go and Node ranges', () {
+    expect(ginVueAdminGoIsCompatible(SoftwareVersion.parse('1.24.1')), isFalse);
+    expect(ginVueAdminGoIsCompatible(SoftwareVersion.parse('1.24.2')), isTrue);
+    expect(
+      ginVueAdminNodeIsCompatible(SoftwareVersion.parse('20.18.9')),
+      isFalse,
+    );
+    expect(
+      ginVueAdminNodeIsCompatible(SoftwareVersion.parse('20.19.0')),
+      isTrue,
+    );
+    expect(
+      ginVueAdminNodeIsCompatible(SoftwareVersion.parse('21.7.0')),
+      isFalse,
+    );
+    expect(
+      ginVueAdminNodeIsCompatible(SoftwareVersion.parse('22.11.0')),
+      isFalse,
+    );
+    expect(
+      ginVueAdminNodeIsCompatible(SoftwareVersion.parse('22.12.0')),
+      isTrue,
+    );
+    expect(
+      ginVueAdminNodeIsCompatible(SoftwareVersion.parse('24.18.0')),
+      isTrue,
+    );
   });
 
   group('service protocol parsers', () {

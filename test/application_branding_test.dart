@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test('uses lc as the public application name', () {
     expect(applicationName, 'lc');
+    expect(applicationVersion, '1.0.0');
   });
 
   test('macOS build metadata produces lc.app', () async {

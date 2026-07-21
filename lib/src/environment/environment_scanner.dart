@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../compatibility/compatibility_requirement.dart';
+import '../compatibility/gin_vue_admin_compatibility.dart';
 import '../compatibility/service_probe.dart';
 import '../compatibility/software_version.dart';
 import '../compatibility/version_output_parser.dart';
@@ -120,15 +121,9 @@ class EnvironmentScanner {
           'go',
           ['version'],
           SoftwareComponent.go,
-          minimum: '1.24.0',
+          minimum: ginVueAdminMinimumGoVersion,
         ),
-        'node' => _versionedCommand(
-          component,
-          'node',
-          ['--version'],
-          SoftwareComponent.node,
-          minimum: '18.16.0',
-        ),
+        'node' => _node(component),
         'npm' => _versionedCommand(
           component,
           'npm',
@@ -224,6 +219,24 @@ class EnvironmentScanner {
       );
     }
     return _missing(component);
+  }
+
+  Future<EnvironmentComponent> _node(EnvironmentComponent component) async {
+    final result = await _versionedCommand(component, 'node', [
+      '--version',
+    ], SoftwareComponent.node);
+    if (result.status != ComponentStatus.ready) return result;
+    final installed = const VersionOutputParser().extract(
+      SoftwareComponent.node,
+      result.version ?? '',
+    );
+    if (installed != null && ginVueAdminNodeIsCompatible(installed)) {
+      return result;
+    }
+    return result.copyWith(
+      status: ComponentStatus.attention,
+      detail: '版本不兼容，需要 20.19.x 或 22.12.0 以上版本',
+    );
   }
 
   Future<EnvironmentComponent> _java(EnvironmentComponent component) async {
@@ -401,6 +414,7 @@ class EnvironmentScanner {
     final managedExtras = <String>[];
     final runtimeLayout = layout;
     if (runtimeLayout != null) {
+      managedExtras.add(runtimeLayout.bin.path);
       final versions = runtimeLayout.readActiveVersionsSync();
       String? rootFor(String id) {
         final version = versions[id];

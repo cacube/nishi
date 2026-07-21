@@ -4,7 +4,7 @@ A Flutter desktop application that prepares and maintains a zero-knowledge devel
 
 ## Product Boundary
 
-The application installs, detects, configures, updates, and repairs development runtimes on Windows and macOS. It does not create projects, edit source code, or embed Codex. After setup, users work in the separate Codex application.
+The application installs, detects, configures, updates, and repairs development runtimes on Windows and macOS. Its companion `lc` CLI creates a matching Flutter and Gin-Vue-Admin workspace. It does not edit source code or embed Codex; after setup and project creation, users work in the separate Codex application.
 
 ## Current Milestone
 
@@ -40,6 +40,10 @@ The application installs, detects, configures, updates, and repairs development 
 - Managed user-environment persistence plus reversible macOS LaunchAgent and
   Windows scheduled-task plans, including MySQL initialization and autostart.
 - macOS release build with the process access required for tool discovery.
+- Joint Windows and macOS installers that install the desktop application and
+  standalone `lc` CLI together and add the CLI to the current user's `PATH`.
+- Transactional `lc init <project-name>` generation with safe names, pinned
+  Gin-Vue-Admin source verification, source fallback, and failure rollback.
 
 The first production manifest exists at
 [`release/runtime-manifest.json`](release/runtime-manifest.json), and the
@@ -67,10 +71,52 @@ Codex and any Terminal application before starting development. Processes that
 were already running cannot inherit the updated `PATH`, `JAVA_HOME`, Android,
 Flutter, Go, Node.js, or MySQL variables.
 
+## Install lc
+
+The packaged installer installs the desktop application and CLI in one action:
+
+- Windows GUI: `%LOCALAPPDATA%\Programs\lc`; CLI:
+  `%LOCALAPPDATA%\DevEnvironmentManager\bin\lc.exe`.
+- macOS GUI: `~/Applications/lc.app`; CLI:
+  `~/Library/Application Support/DevEnvironmentManager/bin/lc`.
+
+Close and reopen Terminal and Codex after installation. Current packages are
+intentionally unsigned for private use, so Windows SmartScreen or macOS
+Gatekeeper may require explicit confirmation.
+
+## Create a Project
+
+After the desktop application reports the environment as ready, open a new
+terminal in the parent directory and run:
+
+```sh
+lc init my_project
+```
+
+The command publishes the project directory only after every step succeeds:
+
+```text
+my_project/
+├── client/                 Flutter application
+├── admin/
+│   ├── server/             Gin-Vue-Admin Go server
+│   └── web/                Gin-Vue-Admin Vue admin
+└── lc-project.json         Secret-free project metadata
+```
+
+The server uses `admin/server/config.lc.local.yaml`, which is ignored by the
+upstream repository. From `admin/server`, start it with
+`go run . -c config.lc.local.yaml`, then complete the official browser database
+initialization. From `admin/web`, use `npm run serve`. Gin-Vue-Admin v3.0.0 is
+BSL 1.1 software; preserve its license and notices and obtain any license
+required for use outside its permitted scope.
+
 ## Verify
 
 ```sh
 flutter analyze
 flutter test
 flutter run -d macos
+dart run bin/lc.dart --help
+scripts/build_macos_installer.sh
 ```

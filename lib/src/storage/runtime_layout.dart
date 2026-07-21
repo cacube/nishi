@@ -9,6 +9,7 @@ final class RuntimeLayout {
   final Directory root;
 
   Directory get cache => Directory(_join(root.path, 'cache'));
+  Directory get bin => Directory(_join(root.path, 'bin'));
   Directory get runtimes => Directory(_join(root.path, 'runtimes'));
   Directory get data => Directory(_join(root.path, 'data'));
   Directory get logs => Directory(_join(root.path, 'logs'));
@@ -49,6 +50,7 @@ final class RuntimeLayout {
   Future<void> ensureCreated() async {
     await Future.wait([
       cache.create(recursive: true),
+      bin.create(recursive: true),
       runtimes.create(recursive: true),
       data.create(recursive: true),
       logs.create(recursive: true),

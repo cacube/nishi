@@ -63,6 +63,16 @@ jobs:
       - name: Build macOS release
         run: flutter build macos --release
 
+      - name: Build joint macOS app and CLI installer
+        run: scripts/build_macos_installer.sh --skip-flutter-build
+
+      - name: Upload macOS installer
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: lc-macos-installer
+          path: build/installers/lc-macos-*.pkg
+          if-no-files-found: error
+
   build-windows:
     name: Build Windows release
     runs-on: windows-latest
@@ -86,3 +96,34 @@ jobs:
 
       - name: Build Windows release
         run: flutter build windows --release
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build joint Windows app and CLI installer
+        shell: pwsh
+        run: .\scripts\build_windows_installer.ps1 -SkipFlutterBuild
+
+      - name: Smoke install and run CLI
+        shell: pwsh
+        run: |
+          $installer = Resolve-Path 'build\installers\lc-windows-x64-setup.exe'
+          $process = Start-Process $installer -Wait -PassThru -ArgumentList @(
+            '/VERYSILENT',
+            '/SUPPRESSMSGBOXES',
+            '/NORESTART'
+          )
+          if ($process.ExitCode -ne 0) {
+            throw "Installer failed with exit code $($process.ExitCode)."
+          }
+          $cli = Join-Path $env:LOCALAPPDATA 'DevEnvironmentManager\bin\lc.exe'
+          & $cli --version
+          if ($LASTEXITCODE -ne 0) { throw 'Installed lc CLI smoke failed.' }
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: lc-windows-installer
+          path: build/installers/lc-windows-x64-setup.exe
+          if-no-files-found: error

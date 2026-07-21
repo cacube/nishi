@@ -149,6 +149,40 @@ Use the same four defines for Windows builds. A public key supplied through a
 `dart-define` becomes part of the application binary; this is expected and does
 not require a GitHub Secret. Never pass the private key through a `dart-define`.
 
+## Desktop Application and CLI Installers
+
+The desktop runner and standalone CLI are separate executables. Build scripts
+compile `bin/lc.dart` as a console executable and place it in the same installer
+under the user-scoped managed `bin` directory.
+
+Build the native macOS package on an arm64 or x64 Mac:
+
+```sh
+scripts/build_macos_installer.sh
+```
+
+This produces `build/installers/lc-macos-<architecture>.pkg`. A universal CLI
+cannot be cross-compiled by one Dart SDK architecture. For a universal package,
+provide matching arm64 and x64 Dart executables:
+
+```sh
+LC_DART_ARM64=/path/to/arm64/dart \
+LC_DART_X64=/path/to/x64/dart \
+scripts/build_macos_installer.sh --architecture universal
+```
+
+Build the Windows package from a Windows host with Inno Setup 6 installed:
+
+```powershell
+.\scripts\build_windows_installer.ps1
+```
+
+Before publishing, install into a clean current-user profile, open a new
+terminal, verify `lc --version`, and verify uninstall removes only the GUI, CLI,
+and its exact `PATH` entry while retaining runtimes, data, cache, and settings.
+Private unsigned packages show operating-system trust warnings; signing and
+notarization are still required before general distribution.
+
 ## Runtime Provider Limits
 
 The signed manifest intentionally keeps Redis-compatible services external and

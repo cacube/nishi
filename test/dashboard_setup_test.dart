@@ -1,5 +1,7 @@
 import 'package:dev_environment_manager/src/dashboard/dashboard_page.dart';
+import 'package:dev_environment_manager/src/environment/environment_component.dart';
 import 'package:dev_environment_manager/src/environment/environment_controller.dart';
+import 'package:dev_environment_manager/src/mysql/mysql_credentials.dart';
 import 'package:dev_environment_manager/src/setup/setup_orchestrator.dart';
 import 'package:dev_environment_manager/src/setup/setup_task.dart';
 import 'package:dev_environment_manager/src/setup_ui/setup_composition.dart';
@@ -163,6 +165,62 @@ void main() {
     expect(actionRuns, 1);
     expect(find.text('配置已完成'), findsOneWidget);
   });
+
+  testWidgets('shows generated MySQL credentials on explicit user request', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1000, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final environment = _StaticEnvironmentController();
+    environment.components = const [
+      EnvironmentComponent(
+        id: 'mysql',
+        name: 'MySQL',
+        group: ComponentGroup.services,
+        icon: Icons.storage,
+        required: true,
+        status: ComponentStatus.ready,
+        version: '8.4.10',
+      ),
+    ];
+    final setup = SetupUiController(
+      prepare: () async =>
+          SetupOrchestrator(tasks: const [], actions: const {}),
+      rescanEnvironment: environment.scan,
+    );
+    addTearDown(setup.dispose);
+    addTearDown(environment.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DashboardPage(
+          composition: SetupComposition.forTesting(
+            environment: environment,
+            setup: setup,
+            mysqlCredentials: const _MemoryMySqlCredentialsReader(),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('mysql-credentials-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('MySQL 连接信息'), findsOneWidget);
+    expect(find.text('127.0.0.1'), findsOneWidget);
+    expect(find.text('3306'), findsOneWidget);
+    expect(find.text('root'), findsOneWidget);
+    expect(find.text('********'), findsOneWidget);
+    expect(find.text('generated-password'), findsNothing);
+
+    await tester.tap(find.byTooltip('显示密码'));
+    await tester.pump();
+    expect(find.text('generated-password'), findsOneWidget);
+  });
 }
 
 RuntimeComponent _managedComponent(String id, String version) {
@@ -204,4 +262,16 @@ final class _CallbackAction implements SetupTaskAction {
 
   @override
   Future<void> execute(SetupProgressCallback onProgress) async => callback();
+}
+
+final class _MemoryMySqlCredentialsReader implements MySqlCredentialsReader {
+  const _MemoryMySqlCredentialsReader();
+
+  @override
+  Future<MySqlCredentials?> read() async => const MySqlCredentials(
+    host: '127.0.0.1',
+    port: 3306,
+    username: 'root',
+    password: 'generated-password',
+  );
 }

@@ -78,15 +78,6 @@ final class MySqlConfigurationResult {
   final String bootstrapSqlPath;
 }
 
-final class MySqlDataDirectoryConflictException implements Exception {
-  const MySqlDataDirectoryConflictException(this.path);
-
-  final String path;
-
-  @override
-  String toString() => 'MySQL 数据目录非空且未检测到系统表，拒绝覆盖：$path';
-}
-
 final class MySqlInitializationException implements Exception {
   const MySqlInitializationException({
     required this.exitCode,
@@ -142,56 +133,81 @@ final class MySqlConfigurator {
     await logDirectory.create(recursive: true);
     final launch = _launchConfiguration;
     final marker = File(_securityMarkerPath);
+    final initializationMarker = File(_initializationMarkerPath);
+    final credentials = File(_join(dataDirectory.path, 'credentials.json'));
     final systemTables = Directory(_join(dataDirectory.path, 'mysql'));
-    if (await systemTables.exists() && !await systemTables.list().isEmpty) {
+    final hasSystemTables =
+        await systemTables.exists() && !await systemTables.list().isEmpty;
+    final isManagedDatabase =
+        hasSystemTables &&
+        (await credentials.exists() ||
+            await marker.exists() ||
+            await File(launch.configPath).exists());
+    if (isManagedDatabase) {
       final result = await _prepareSecureBootstrap(launch, initialized: false);
       if (await marker.exists()) await marker.delete();
+      if (await initializationMarker.exists()) {
+        await initializationMarker.delete();
+      }
       return result;
     }
     if (!await dataDirectory.list().isEmpty) {
-      throw MySqlDataDirectoryConflictException(dataDirectory.path);
+      await _preserveIncompleteDataDirectory();
+      await dataDirectory.create(recursive: true);
     }
 
     _throwIfCancelled();
-    final process = await _processStarter.start(
-      MySqlProcessRequest(
-        executable: launch.executable,
-        arguments: [
-          '--initialize-insecure',
-          '--basedir=$mysqlRoot',
-          '--datadir=${dataDirectory.path}',
-        ],
-        runInShell: isWindows,
-      ),
+    await initializationMarker.writeAsString(
+      DateTime.now().toUtc().toIso8601String(),
+      flush: true,
     );
-    _activeProcess = process;
     try {
-      if (_cancelRequested) {
-        process.kill();
-        throw const MySqlConfigurationCancelledException();
+      final process = await _processStarter.start(
+        MySqlProcessRequest(
+          executable: launch.executable,
+          arguments: [
+            '--initialize-insecure',
+            '--basedir=$mysqlRoot',
+            '--datadir=${dataDirectory.path}',
+          ],
+          runInShell: false,
+        ),
+      );
+      _activeProcess = process;
+      try {
+        if (_cancelRequested) {
+          process.kill();
+          throw const MySqlConfigurationCancelledException();
+        }
+        final stdout = process.stdout.transform(utf8.decoder).join();
+        final stderr = process.stderr.transform(utf8.decoder).join();
+        final exitCode = await process.exitCode;
+        final output = await stdout;
+        final errorOutput = await stderr;
+        _throwIfCancelled();
+        if (exitCode != 0) {
+          throw MySqlInitializationException(
+            exitCode: exitCode,
+            details: errorOutput.trim().isNotEmpty ? errorOutput : output,
+          );
+        }
+      } finally {
+        if (identical(_activeProcess, process)) {
+          _activeProcess = null;
+        }
       }
-      final stdout = process.stdout.transform(utf8.decoder).join();
-      final stderr = process.stderr.transform(utf8.decoder).join();
-      final exitCode = await process.exitCode;
-      final output = await stdout;
-      final errorOutput = await stderr;
-      _throwIfCancelled();
-      if (exitCode != 0) {
-        throw MySqlInitializationException(
-          exitCode: exitCode,
-          details: errorOutput.trim().isNotEmpty ? errorOutput : output,
-        );
-      }
-    } finally {
-      if (identical(_activeProcess, process)) {
-        _activeProcess = null;
-      }
-    }
 
-    _throwIfCancelled();
-    final result = await _prepareSecureBootstrap(launch, initialized: true);
-    if (await marker.exists()) await marker.delete();
-    return result;
+      _throwIfCancelled();
+      final result = await _prepareSecureBootstrap(launch, initialized: true);
+      if (await marker.exists()) await marker.delete();
+      if (await initializationMarker.exists()) {
+        await initializationMarker.delete();
+      }
+      return result;
+    } on Object {
+      await _cleanOwnedIncompleteInitialization(initializationMarker);
+      rethrow;
+    }
   }
 
   MySqlLaunchConfiguration get _launchConfiguration {
@@ -219,6 +235,22 @@ final class MySqlConfigurator {
 
   String get _securityMarkerPath =>
       _join(dataDirectory.path, '.root-password-required');
+
+  String get _initializationMarkerPath => '${dataDirectory.path}.initializing';
+
+  Future<void> _preserveIncompleteDataDirectory() async {
+    final timestamp = DateTime.now().toUtc().microsecondsSinceEpoch;
+    final recovery = Directory('${dataDirectory.path}.recovered-$timestamp');
+    await dataDirectory.rename(recovery.path);
+  }
+
+  Future<void> _cleanOwnedIncompleteInitialization(File marker) async {
+    if (!await marker.exists()) return;
+    if (await dataDirectory.exists()) {
+      await dataDirectory.delete(recursive: true);
+    }
+    await marker.delete();
+  }
 
   void _throwIfCancelled() {
     if (_cancelRequested) {

@@ -1,11 +1,13 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../app_brand.dart';
 import '../environment/environment_component.dart';
 import '../environment/environment_controller.dart';
 import '../install/artifact_installer.dart';
+import '../mysql/mysql_credentials.dart';
 import '../settings/settings.dart';
 import '../setup/setup_task.dart';
 import '../setup_ui/setup_composition.dart';
@@ -89,6 +91,28 @@ class _DashboardPageState extends State<DashboardPage> {
     _DashboardSection.settings => _composition.settings.load(),
   };
 
+  Future<void> _showMySqlCredentials() async {
+    try {
+      final credentials = await _composition.mysqlCredentials.read();
+      if (!mounted) return;
+      if (credentials == null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('MySQL 尚未完成安装，暂时没有连接信息。')));
+        return;
+      }
+      await showDialog<void>(
+        context: context,
+        builder: (context) => _MySqlCredentialsDialog(credentials: credentials),
+      );
+    } on Object {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('无法读取 MySQL 连接信息，请重试安装。')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -133,6 +157,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         onOpenUpdates: () =>
                             _selectSection(_DashboardSection.updates),
                         runtimeBusy: _composition.operations.busy,
+                        onShowMySqlCredentials: _showMySqlCredentials,
                       ),
                       _DashboardSection.updates => _UpdateBody(
                         controller: _composition.updates,
@@ -868,12 +893,14 @@ class _DashboardBody extends StatelessWidget {
     required this.setup,
     required this.onOpenUpdates,
     required this.runtimeBusy,
+    required this.onShowMySqlCredentials,
   });
 
   final EnvironmentController controller;
   final SetupUiController setup;
   final VoidCallback onOpenUpdates;
   final bool runtimeBusy;
+  final VoidCallback onShowMySqlCredentials;
 
   @override
   Widget build(BuildContext context) {
@@ -914,6 +941,7 @@ class _DashboardBody extends StatelessWidget {
                               ComponentGroup.flutter,
                               ComponentGroup.tools,
                             ],
+                            onShowMySqlCredentials: onShowMySqlCredentials,
                           ),
                         ),
                         const SizedBox(width: 18),
@@ -924,6 +952,7 @@ class _DashboardBody extends StatelessWidget {
                               ComponentGroup.server,
                               ComponentGroup.services,
                             ],
+                            onShowMySqlCredentials: onShowMySqlCredentials,
                           ),
                         ),
                       ],
@@ -932,6 +961,7 @@ class _DashboardBody extends StatelessWidget {
                     _GroupColumn(
                       controller: controller,
                       groups: ComponentGroup.values,
+                      onShowMySqlCredentials: onShowMySqlCredentials,
                     ),
                 ],
               ),
@@ -1368,10 +1398,15 @@ Future<void> _launchInstaller(
 }
 
 class _GroupColumn extends StatelessWidget {
-  const _GroupColumn({required this.controller, required this.groups});
+  const _GroupColumn({
+    required this.controller,
+    required this.groups,
+    required this.onShowMySqlCredentials,
+  });
 
   final EnvironmentController controller;
   final Iterable<ComponentGroup> groups;
+  final VoidCallback onShowMySqlCredentials;
 
   @override
   Widget build(BuildContext context) {
@@ -1383,6 +1418,7 @@ class _GroupColumn extends StatelessWidget {
             components: controller.components
                 .where((component) => component.group == group)
                 .toList(),
+            onShowMySqlCredentials: onShowMySqlCredentials,
           ),
           const SizedBox(height: 18),
         ],
@@ -1392,10 +1428,15 @@ class _GroupColumn extends StatelessWidget {
 }
 
 class _ComponentGroup extends StatelessWidget {
-  const _ComponentGroup({required this.group, required this.components});
+  const _ComponentGroup({
+    required this.group,
+    required this.components,
+    required this.onShowMySqlCredentials,
+  });
 
   final ComponentGroup group;
   final List<EnvironmentComponent> components;
+  final VoidCallback onShowMySqlCredentials;
 
   String get title => switch (group) {
     ComponentGroup.flutter => 'Flutter 与平台',
@@ -1420,7 +1461,10 @@ class _ComponentGroup extends StatelessWidget {
           ),
           const Divider(),
           for (var index = 0; index < components.length; index++) ...[
-            _ComponentRow(component: components[index]),
+            _ComponentRow(
+              component: components[index],
+              onShowMySqlCredentials: onShowMySqlCredentials,
+            ),
             if (index != components.length - 1) const Divider(indent: 58),
           ],
         ],
@@ -1430,9 +1474,13 @@ class _ComponentGroup extends StatelessWidget {
 }
 
 class _ComponentRow extends StatelessWidget {
-  const _ComponentRow({required this.component});
+  const _ComponentRow({
+    required this.component,
+    required this.onShowMySqlCredentials,
+  });
 
   final EnvironmentComponent component;
+  final VoidCallback onShowMySqlCredentials;
 
   @override
   Widget build(BuildContext context) {
@@ -1496,6 +1544,15 @@ class _ComponentRow extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 10),
+            if (component.id == 'mysql') ...[
+              TextButton.icon(
+                key: const Key('mysql-credentials-button'),
+                onPressed: onShowMySqlCredentials,
+                icon: const Icon(Icons.key_outlined, size: 16),
+                label: const Text('连接信息'),
+              ),
+              const SizedBox(width: 8),
+            ],
             Icon(statusIcon, size: 17, color: statusColor),
             const SizedBox(width: 5),
             SizedBox(
@@ -1507,6 +1564,124 @@ class _ComponentRow extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _MySqlCredentialsDialog extends StatefulWidget {
+  const _MySqlCredentialsDialog({required this.credentials});
+
+  final MySqlCredentials credentials;
+
+  @override
+  State<_MySqlCredentialsDialog> createState() =>
+      _MySqlCredentialsDialogState();
+}
+
+class _MySqlCredentialsDialogState extends State<_MySqlCredentialsDialog> {
+  bool _showPassword = false;
+
+  Future<void> _copy(String label, String value) async {
+    await Clipboard.setData(ClipboardData(text: value));
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('$label已复制')));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final credentials = widget.credentials;
+    return AlertDialog(
+      title: const Text('MySQL 连接信息'),
+      content: SizedBox(
+        width: 440,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _CredentialRow(
+              label: '地址',
+              value: credentials.host,
+              onCopy: () => _copy('地址', credentials.host),
+            ),
+            _CredentialRow(
+              label: '端口',
+              value: credentials.port.toString(),
+              onCopy: () => _copy('端口', credentials.port.toString()),
+            ),
+            _CredentialRow(
+              label: '用户名',
+              value: credentials.username,
+              onCopy: () => _copy('用户名', credentials.username),
+            ),
+            _CredentialRow(
+              label: '密码',
+              value: _showPassword ? credentials.password : '********',
+              onCopy: () => _copy('密码', credentials.password),
+              trailing: IconButton(
+                tooltip: _showPassword ? '隐藏密码' : '显示密码',
+                onPressed: () => setState(() => _showPassword = !_showPassword),
+                icon: Icon(
+                  _showPassword
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('关闭'),
+        ),
+      ],
+    );
+  }
+}
+
+class _CredentialRow extends StatelessWidget {
+  const _CredentialRow({
+    required this.label,
+    required this.value,
+    required this.onCopy,
+    this.trailing,
+  });
+
+  final String label;
+  final String value;
+  final VoidCallback onCopy;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 52,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 64,
+            child: Text(
+              label,
+              style: const TextStyle(color: Color(0xFF687069)),
+            ),
+          ),
+          Expanded(
+            child: SelectableText(
+              value,
+              maxLines: 1,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+            ),
+          ),
+          ?trailing,
+          IconButton(
+            tooltip: '复制$label',
+            onPressed: onCopy,
+            icon: const Icon(Icons.copy_outlined, size: 18),
+          ),
+        ],
       ),
     );
   }

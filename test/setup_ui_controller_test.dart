@@ -7,6 +7,7 @@ import 'package:dev_environment_manager/src/environment/environment_controller.d
 import 'package:dev_environment_manager/src/install/artifact_installer.dart';
 import 'package:dev_environment_manager/src/manifest_security/remote_manifest_exceptions.dart';
 import 'package:dev_environment_manager/src/manifest_security/remote_manifest_release_configuration.dart';
+import 'package:dev_environment_manager/src/mysql/mysql_configurator.dart';
 import 'package:dev_environment_manager/src/operation/runtime_operation_coordinator.dart';
 import 'package:dev_environment_manager/src/provisioning/runtime_target.dart';
 import 'package:dev_environment_manager/src/provisioning/provisioning_workflow.dart';
@@ -194,6 +195,31 @@ void main() {
     expect(successfulRuns, 1);
     expect(scanCount, 1);
   });
+
+  test(
+    'shows a bounded MySQL initialization error without hiding its cause',
+    () async {
+      final controller = SetupUiController(
+        prepare: () async => SetupOrchestrator(
+          tasks: const [SetupTaskDefinition(id: 'mysql', label: 'MySQL')],
+          actions: {
+            'mysql': _CallbackAction(
+              () => throw const MySqlInitializationException(
+                exitCode: 1,
+                details: 'The data directory is not writable',
+              ),
+            ),
+          },
+        ),
+        rescanEnvironment: () async {},
+      );
+
+      await controller.start();
+
+      expect(controller.state.tasks.single.message, contains('退出码 1'));
+      expect(controller.state.tasks.single.message, contains('not writable'));
+    },
+  );
 
   test(
     'exposes a user action request and continues after confirmation',

@@ -28,6 +28,7 @@ class SetupTaskState {
     this.status = SetupTaskStatus.pending,
     this.progress = 0,
     this.message,
+    this.failure,
     this.userActionRequest,
   });
 
@@ -35,6 +36,7 @@ class SetupTaskState {
   final SetupTaskStatus status;
   final double progress;
   final String? message;
+  final Object? failure;
   final Object? userActionRequest;
 
   SetupTaskState copyWith({
@@ -42,6 +44,8 @@ class SetupTaskState {
     double? progress,
     String? message,
     bool clearMessage = false,
+    Object? failure,
+    bool clearFailure = false,
     Object? userActionRequest,
     bool clearUserActionRequest = false,
   }) {
@@ -50,6 +54,7 @@ class SetupTaskState {
       status: status ?? this.status,
       progress: progress ?? this.progress,
       message: clearMessage ? null : message ?? this.message,
+      failure: clearFailure ? null : failure ?? this.failure,
       userActionRequest: clearUserActionRequest
           ? null
           : userActionRequest ?? this.userActionRequest,

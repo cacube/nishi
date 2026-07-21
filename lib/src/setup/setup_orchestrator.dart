@@ -79,6 +79,7 @@ class SetupOrchestrator extends ChangeNotifier {
           status: SetupTaskStatus.pending,
           progress: 0,
           clearMessage: true,
+          clearFailure: true,
           clearUserActionRequest: true,
         );
       }
@@ -151,6 +152,7 @@ class SetupOrchestrator extends ChangeNotifier {
         status: SetupTaskStatus.running,
         progress: 0,
         clearMessage: true,
+        clearFailure: true,
         clearUserActionRequest: true,
       ),
     );
@@ -187,6 +189,8 @@ class SetupOrchestrator extends ChangeNotifier {
               ? SetupTaskStatus.cancelled
               : SetupTaskStatus.failed,
           message: _cancelRequested ? '已取消' : error.toString(),
+          failure: _cancelRequested ? null : error,
+          clearFailure: _cancelRequested,
         ),
       );
     } finally {

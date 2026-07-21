@@ -5,6 +5,7 @@ import '../environment/environment_controller.dart';
 import '../environment/environment_scanner.dart';
 import '../install/artifact_installer.dart';
 import '../manifest_security/remote_manifest_release_configuration.dart';
+import '../mysql/mysql_credentials.dart';
 import '../operation/runtime_operation_coordinator.dart';
 import '../provisioning/managed_runtime_health.dart';
 import '../provisioning/provisioning_workflow.dart';
@@ -23,6 +24,7 @@ final class SetupComposition {
     required this.settings,
     required this.updates,
     required this.operations,
+    required this.mysqlCredentials,
     required DownloadManager? downloads,
   }) : _downloads = downloads;
 
@@ -31,6 +33,8 @@ final class SetupComposition {
     required SetupUiController setup,
     SettingsController? settings,
     UpdateController? updates,
+    MySqlCredentialsReader mysqlCredentials =
+        const EmptyMySqlCredentialsReader(),
   }) {
     final testSettings =
         settings ??
@@ -56,6 +60,7 @@ final class SetupComposition {
       settings: testSettings,
       updates: testUpdates,
       operations: RuntimeOperationCoordinator(),
+      mysqlCredentials: mysqlCredentials,
       downloads: null,
     );
   }
@@ -136,6 +141,12 @@ final class SetupComposition {
       settings: settings,
       updates: updates,
       operations: operations,
+      mysqlCredentials: FileMySqlCredentialsReader(
+        File(
+          '${layout.data.path}${Platform.pathSeparator}mysql'
+          '${Platform.pathSeparator}credentials.json',
+        ),
+      ),
       downloads: downloads,
     );
   }
@@ -145,6 +156,7 @@ final class SetupComposition {
   final SettingsController settings;
   final UpdateController updates;
   final RuntimeOperationCoordinator operations;
+  final MySqlCredentialsReader mysqlCredentials;
   final DownloadManager? _downloads;
 
   void dispose() {

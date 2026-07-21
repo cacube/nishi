@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dev_environment_manager/src/mysql/mysql_configurator.dart';
+import 'package:dev_environment_manager/src/mysql/mysql_credentials.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -47,6 +48,7 @@ void main() {
         '--basedir=${temporaryRoot.path}/runtimes/mysql',
         '--datadir=${dataDirectory.path}',
       ]);
+      expect(processes.requests.single.runInShell, isFalse);
       final launch = result.launchConfiguration;
       expect(result.initialized, isTrue);
       expect(launch.serverArguments, ['--defaults-file=${launch.configPath}']);
@@ -88,6 +90,9 @@ void main() {
       final systemTables = Directory('${dataDirectory.path}/mysql');
       await systemTables.create(recursive: true);
       await File('${systemTables.path}/user.ibd').writeAsString('existing');
+      await File('${dataDirectory.path}/credentials.json').writeAsString(
+        '{"host":"127.0.0.1","port":3306,"username":"root","password":"existing-password"}',
+      );
       final processes = _RecordingProcessStarter(const []);
       final configurator = MySqlConfigurator(
         mysqlRoot: '${temporaryRoot.path}/runtimes/mysql',
@@ -144,12 +149,12 @@ void main() {
     },
   );
 
-  test('refuses a non-empty directory without mysql system tables', () async {
+  test('preserves an incomplete data directory before retrying', () async {
     final dataDirectory = Directory('${temporaryRoot.path}/data/mysql');
     final logDirectory = Directory('${temporaryRoot.path}/logs/mysql');
     await dataDirectory.create(recursive: true);
     await File('${dataDirectory.path}/unrelated.txt').writeAsString('keep me');
-    final processes = _RecordingProcessStarter(const []);
+    final processes = _RecordingProcessStarter([_CompletedProcess()]);
     final configurator = MySqlConfigurator(
       mysqlRoot: '${temporaryRoot.path}/runtimes/mysql',
       dataDirectory: dataDirectory,
@@ -158,17 +163,20 @@ void main() {
       isWindows: false,
     );
 
-    await expectLater(
-      configurator.configure(),
-      throwsA(
-        isA<MySqlDataDirectoryConflictException>().having(
-          (error) => error.toString(),
-          'message',
-          allOf(contains('非空'), contains(dataDirectory.path)),
-        ),
-      ),
+    await configurator.configure();
+
+    final recovered = await dataDirectory.parent
+        .list()
+        .where(
+          (entry) => entry.path.startsWith('${dataDirectory.path}.recovered-'),
+        )
+        .toList();
+    expect(recovered, hasLength(1));
+    expect(
+      await File('${recovered.single.path}/unrelated.txt').readAsString(),
+      'keep me',
     );
-    expect(processes.requests, isEmpty);
+    expect(processes.requests, hasLength(1));
   });
 
   test(
@@ -204,6 +212,11 @@ void main() {
         await File('${dataDirectory.path}/.root-password-required').exists(),
         isFalse,
       );
+      expect(await dataDirectory.exists(), isFalse);
+      expect(
+        await File('${dataDirectory.path}.initializing').exists(),
+        isFalse,
+      );
     },
   );
 
@@ -226,11 +239,27 @@ void main() {
       throwsA(isA<MySqlConfigurationCancelledException>()),
     );
     await processes.started.future;
+    await File('${dataDirectory.path}/partial.ibd').writeAsString('partial');
     configurator.cancel();
 
     await expectation;
     expect(activeProcess.killed, isTrue);
-    expect(await File('${dataDirectory.path}/my.cnf').exists(), isFalse);
+    expect(await dataDirectory.exists(), isFalse);
+    expect(await File('${dataDirectory.path}.initializing').exists(), isFalse);
+  });
+
+  test('reads generated connection credentials for the desktop UI', () async {
+    final file = File('${temporaryRoot.path}/credentials.json');
+    await file.writeAsString(
+      '{"host":"127.0.0.1","port":3306,"username":"root","password":"secret"}',
+    );
+
+    final credentials = await FileMySqlCredentialsReader(file).read();
+
+    expect(credentials?.host, '127.0.0.1');
+    expect(credentials?.port, 3306);
+    expect(credentials?.username, 'root');
+    expect(credentials?.password, 'secret');
   });
 }
 

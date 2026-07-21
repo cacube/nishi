@@ -105,11 +105,33 @@ my_project/
 ```
 
 The server uses `admin/server/config.lc.local.yaml`, which is ignored by the
-upstream repository. From `admin/server`, start it with
-`go run . -c config.lc.local.yaml`, then complete the official browser database
-initialization. From `admin/web`, use `npm run serve`. Gin-Vue-Admin v3.0.0 is
-BSL 1.1 software; preserve its license and notices and obtain any license
-required for use outside its permitted scope.
+upstream repository. Enter the generated project (or any directory below it)
+and use the project-aware commands:
+
+```sh
+lc dev                         # Start Flutter, Go server, and Vue admin
+lc dev client -d chrome        # Start only Flutter on Chrome
+lc deps                        # Restore all dependencies with source fallback
+lc build web                   # Build the Flutter web client
+lc build server                # Build the Go server
+lc build admin                 # Build the Vue admin
+lc test                        # Run Flutter and Go tests
+lc clean                       # Clean generated outputs, keep node_modules
+lc doctor                      # Check the complete host toolchain
+```
+
+Every native command remains available without manually changing directories:
+
+```sh
+lc flutter pub add dio
+lc go generate ./...
+lc npm run lint
+```
+
+After the first server start, complete the official browser database
+initialization. Gin-Vue-Admin v3.0.0 is BSL 1.1 software; preserve its license
+and notices and obtain any license required for use outside its permitted
+scope.
 
 ## Verify
 

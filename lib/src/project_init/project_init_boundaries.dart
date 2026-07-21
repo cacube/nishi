@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -10,6 +11,8 @@ final class ProjectCommand {
     this.workingDirectory,
     this.environment = const {},
     this.runInShell = false,
+    this.captureOutput = true,
+    this.forwardStdin = false,
   });
 
   final String executable;
@@ -17,6 +20,8 @@ final class ProjectCommand {
   final String? workingDirectory;
   final Map<String, String> environment;
   final bool runInShell;
+  final bool captureOutput;
+  final bool forwardStdin;
 }
 
 final class ProjectProcessResult {
@@ -53,18 +58,25 @@ final class IoProjectProcessRunner implements ProjectProcessRunner {
       environment: command.environment.isEmpty ? null : command.environment,
       runInShell: command.runInShell,
     );
+    if (command.forwardStdin) {
+      unawaited(
+        process.stdin.addStream(stdin).catchError((Object _) {
+          // The child may close stdin before the parent terminal closes.
+        }),
+      );
+    }
     final stdoutBuffer = StringBuffer();
     final stderrBuffer = StringBuffer();
     final stdoutDone = process.stdout
         .transform(const Utf8Decoder(allowMalformed: true))
         .forEach((chunk) {
-          stdoutBuffer.write(chunk);
+          if (command.captureOutput) stdoutBuffer.write(chunk);
           onOutput?.call(chunk);
         });
     final stderrDone = process.stderr
         .transform(const Utf8Decoder(allowMalformed: true))
         .forEach((chunk) {
-          stderrBuffer.write(chunk);
+          if (command.captureOutput) stderrBuffer.write(chunk);
           onOutput?.call(chunk);
         });
     final exitCode = await process.exitCode;

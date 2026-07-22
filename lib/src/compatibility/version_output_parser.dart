@@ -37,7 +37,7 @@ final class VersionOutputParser {
         ),
       ],
       SoftwareComponent.node => [
-        RegExp(r'^\s*v(\d+(?:\.\d+)+(?:-[\w.-]+)?)\s*$', multiLine: true),
+        RegExp(r'^\s*v?(\d+(?:\.\d+)+(?:-[\w.-]+)?)\s*$', multiLine: true),
       ],
       SoftwareComponent.npm => [
         RegExp(r'^\s*(\d+(?:\.\d+)+(?:-[\w.-]+)?)\s*$', multiLine: true),

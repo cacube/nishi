@@ -85,6 +85,11 @@ void main() {
       expect(version.toString(), '5.7.44');
     });
 
+    test('accepts a normalized Node version without the command prefix', () {
+      final version = parser.extract(SoftwareComponent.node, '24.8.0');
+      expect(version.toString(), '24.8.0');
+    });
+
     test('returns null for unrelated output', () {
       expect(parser.extract(SoftwareComponent.go, 'command not found'), isNull);
     });

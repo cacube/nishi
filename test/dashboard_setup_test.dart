@@ -168,6 +168,82 @@ void main() {
     expect(find.text('配置已完成'), findsOneWidget);
   });
 
+  testWidgets('manual setup includes dependencies for the selected component', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    Set<String>? preparedIds;
+    final environment = _StaticEnvironmentController();
+    environment.components = const [
+      EnvironmentComponent(
+        id: 'flutter',
+        name: 'Flutter SDK',
+        group: ComponentGroup.flutter,
+        icon: Icons.flutter_dash,
+        required: true,
+        status: ComponentStatus.missing,
+      ),
+    ];
+    final setup = SetupUiController(
+      prepare: () async =>
+          SetupOrchestrator(tasks: const [], actions: const {}),
+      prepareSelection: (componentIds) async {
+        preparedIds = componentIds;
+        return SetupOrchestrator(tasks: const [], actions: const {});
+      },
+      rescanEnvironment: environment.scan,
+    );
+    addTearDown(setup.dispose);
+    addTearDown(environment.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DashboardPage(
+          composition: SetupComposition.forTesting(
+            environment: environment,
+            setup: setup,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('一键配置'), findsOneWidget);
+    expect(find.text('选择安装'), findsOneWidget);
+    await tester.tap(find.text('选择安装'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('选择安装组件'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('install-flutter')));
+    await tester.pump();
+
+    expect(
+      tester
+          .widget<CheckboxListTile>(find.byKey(const Key('install-jdk')))
+          .value,
+      isTrue,
+    );
+    expect(
+      tester
+          .widget<CheckboxListTile>(
+            find.byKey(const Key('install-android-sdk')),
+          )
+          .value,
+      isTrue,
+    );
+    expect(find.text('安装所选 (3)'), findsOneWidget);
+
+    await tester.tap(find.text('安装所选 (3)'));
+    await tester.pumpAndSettle();
+
+    expect(preparedIds, {'jdk', 'android-sdk', 'flutter'});
+    expect(setup.state.phase, SetupUiPhase.completed);
+  });
+
   testWidgets('shows generated MySQL credentials on explicit user request', (
     tester,
   ) async {

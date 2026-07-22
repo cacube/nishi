@@ -301,7 +301,9 @@ final class SetupUiController extends ChangeNotifier {
       phase: phase,
       tasks: orchestrator.tasks.map(_mapTask).toList(growable: false),
       progress: orchestrator.progress,
-      errorMessage: phase == SetupUiPhase.failed ? '部分组件安装失败，请重试。' : null,
+      errorMessage: phase == SetupUiPhase.failed
+          ? '部分组件安装失败；不受影响的组件已继续配置。'
+          : null,
       clearError: phase != SetupUiPhase.failed,
     );
     notifyListeners();

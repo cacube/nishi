@@ -16,6 +16,51 @@ import '../update/update.dart';
 
 enum _DashboardSection { environment, updates, settings }
 
+const _manualInstallComponents = [
+  _ManualInstallComponent(
+    runtimeId: 'jdk',
+    environmentId: 'java',
+    label: 'JDK',
+  ),
+  _ManualInstallComponent(
+    runtimeId: 'android-sdk',
+    environmentId: 'android',
+    label: 'Android SDK',
+    dependencies: {'jdk'},
+  ),
+  _ManualInstallComponent(
+    runtimeId: 'flutter',
+    environmentId: 'flutter',
+    label: 'Flutter SDK',
+    dependencies: {'jdk', 'android-sdk'},
+  ),
+  _ManualInstallComponent(runtimeId: 'go', environmentId: 'go', label: 'Go'),
+  _ManualInstallComponent(
+    runtimeId: 'node',
+    environmentId: 'node',
+    label: 'Node.js',
+  ),
+  _ManualInstallComponent(
+    runtimeId: 'mysql',
+    environmentId: 'mysql',
+    label: 'MySQL',
+  ),
+];
+
+final class _ManualInstallComponent {
+  const _ManualInstallComponent({
+    required this.runtimeId,
+    required this.environmentId,
+    required this.label,
+    this.dependencies = const {},
+  });
+
+  final String runtimeId;
+  final String environmentId;
+  final String label;
+  final Set<String> dependencies;
+}
+
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key, this.composition});
 
@@ -902,6 +947,15 @@ class _DashboardBody extends StatelessWidget {
   final bool runtimeBusy;
   final VoidCallback onShowMySqlCredentials;
 
+  Future<void> _selectInstall(BuildContext context) async {
+    final selected = await _showManualInstallDialog(
+      context,
+      controller.components,
+    );
+    if (selected == null || selected.isEmpty) return;
+    await setup.startSelected(selected);
+  }
+
   @override
   Widget build(BuildContext context) {
     if (controller.components.isEmpty && controller.scanning) {
@@ -923,6 +977,7 @@ class _DashboardBody extends StatelessWidget {
                     controller: controller,
                     setup: setup,
                     onOpenUpdates: onOpenUpdates,
+                    onSelectInstall: () => _selectInstall(context),
                     runtimeBusy: runtimeBusy,
                   ),
                   if (setup.state.phase != SetupUiPhase.idle) ...[
@@ -978,12 +1033,14 @@ class _ReadinessBand extends StatelessWidget {
     required this.controller,
     required this.setup,
     required this.onOpenUpdates,
+    required this.onSelectInstall,
     required this.runtimeBusy,
   });
 
   final EnvironmentController controller;
   final SetupUiController setup;
   final VoidCallback onOpenUpdates;
+  final VoidCallback onSelectInstall;
   final bool runtimeBusy;
 
   @override
@@ -1053,6 +1110,7 @@ class _ReadinessBand extends StatelessWidget {
             setup: setup,
             ready: ready,
             onOpenUpdates: onOpenUpdates,
+            onSelectInstall: onSelectInstall,
             runtimeBusy: runtimeBusy,
           ),
         ],
@@ -1066,12 +1124,14 @@ class _SetupCommand extends StatelessWidget {
     required this.setup,
     required this.ready,
     required this.onOpenUpdates,
+    required this.onSelectInstall,
     required this.runtimeBusy,
   });
 
   final SetupUiController setup;
   final bool ready;
   final VoidCallback onOpenUpdates;
+  final VoidCallback onSelectInstall;
   final bool runtimeBusy;
 
   @override
@@ -1085,10 +1145,22 @@ class _SetupCommand extends StatelessWidget {
         icon: const Icon(Icons.close),
         label: Text(phase == SetupUiPhase.cancelling ? '正在取消' : '取消'),
       ),
-      SetupUiPhase.failed => FilledButton.icon(
-        onPressed: setup.retry,
-        icon: const Icon(Icons.refresh),
-        label: const Text('重试失败项'),
+      SetupUiPhase.failed => Wrap(
+        spacing: 10,
+        runSpacing: 8,
+        alignment: WrapAlignment.end,
+        children: [
+          OutlinedButton.icon(
+            onPressed: runtimeBusy ? null : onSelectInstall,
+            icon: const Icon(Icons.tune),
+            label: const Text('选择安装'),
+          ),
+          FilledButton.icon(
+            onPressed: runtimeBusy ? null : setup.retry,
+            icon: const Icon(Icons.refresh),
+            label: const Text('重试失败项'),
+          ),
+        ],
       ),
       SetupUiPhase.awaitingPreflight ||
       SetupUiPhase.awaitingUser => OutlinedButton.icon(
@@ -1096,13 +1168,124 @@ class _SetupCommand extends StatelessWidget {
         icon: const Icon(Icons.close),
         label: const Text('取消'),
       ),
-      _ => FilledButton.icon(
-        onPressed: runtimeBusy ? null : (ready ? onOpenUpdates : setup.start),
-        icon: Icon(ready ? Icons.system_update_alt : Icons.download),
-        label: Text(ready ? '检查更新' : '一键配置'),
+      _ => Wrap(
+        spacing: 10,
+        runSpacing: 8,
+        alignment: WrapAlignment.end,
+        children: [
+          OutlinedButton.icon(
+            onPressed: runtimeBusy ? null : onSelectInstall,
+            icon: const Icon(Icons.tune),
+            label: const Text('选择安装'),
+          ),
+          FilledButton.icon(
+            onPressed: runtimeBusy
+                ? null
+                : (ready ? onOpenUpdates : setup.start),
+            icon: Icon(ready ? Icons.system_update_alt : Icons.download),
+            label: Text(ready ? '检查更新' : '一键配置'),
+          ),
+        ],
       ),
     };
   }
+}
+
+Future<Set<String>?> _showManualInstallDialog(
+  BuildContext context,
+  List<EnvironmentComponent> components,
+) {
+  final environmentById = {
+    for (final component in components) component.id: component,
+  };
+  final selected = <String>{};
+
+  void selectWithDependencies(String runtimeId) {
+    if (!selected.add(runtimeId)) return;
+    final component = _manualInstallComponents.firstWhere(
+      (candidate) => candidate.runtimeId == runtimeId,
+    );
+    for (final dependency in component.dependencies) {
+      selectWithDependencies(dependency);
+    }
+  }
+
+  void deselectWithDependants(String runtimeId) {
+    if (!selected.remove(runtimeId)) return;
+    for (final component in _manualInstallComponents) {
+      if (component.dependencies.contains(runtimeId) &&
+          selected.contains(component.runtimeId)) {
+        deselectWithDependants(component.runtimeId);
+      }
+    }
+  }
+
+  return showDialog<Set<String>>(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setState) => AlertDialog(
+        title: const Text('选择安装组件'),
+        content: SizedBox(
+          width: 480,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final installable in _manualInstallComponents)
+                  CheckboxListTile(
+                    key: Key('install-${installable.runtimeId}'),
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    value: selected.contains(installable.runtimeId),
+                    onChanged: (checked) {
+                      setState(() {
+                        if (checked ?? false) {
+                          selectWithDependencies(installable.runtimeId);
+                        } else {
+                          deselectWithDependants(installable.runtimeId);
+                        }
+                      });
+                    },
+                    title: Text(installable.label),
+                    subtitle: Text(
+                      _manualInstallStatus(
+                        environmentById[installable.environmentId],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton.icon(
+            onPressed: selected.isEmpty
+                ? null
+                : () => Navigator.of(context).pop(Set.unmodifiable(selected)),
+            icon: const Icon(Icons.download),
+            label: Text('安装所选 (${selected.length})'),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+String _manualInstallStatus(EnvironmentComponent? component) {
+  if (component == null || component.status == ComponentStatus.checking) {
+    return '等待检测';
+  }
+  final version = component.version?.trim();
+  return switch (component.status) {
+    ComponentStatus.ready => version == null ? '当前可用' : '$version · 当前可用',
+    ComponentStatus.missing => '本机未安装',
+    ComponentStatus.attention => version == null ? '需要处理' : '$version · 需要处理',
+    ComponentStatus.checking => '等待检测',
+  };
 }
 
 class _SetupProgressPanel extends StatelessWidget {

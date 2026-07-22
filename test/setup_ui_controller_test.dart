@@ -198,6 +198,44 @@ void main() {
   });
 
   test(
+    'can select another component after an independent task fails',
+    () async {
+      var independentRuns = 0;
+      Set<String>? selectedIds;
+      final controller = SetupUiController(
+        prepare: () async => SetupOrchestrator(
+          tasks: const [
+            SetupTaskDefinition(id: 'jdk', label: 'JDK'),
+            SetupTaskDefinition(id: 'go', label: 'Go'),
+          ],
+          actions: {
+            'jdk': _CallbackAction(() => throw StateError('download failed')),
+            'go': _CallbackAction(() => independentRuns++),
+          },
+        ),
+        prepareSelection: (componentIds) async {
+          selectedIds = componentIds;
+          return SetupOrchestrator(
+            tasks: const [SetupTaskDefinition(id: 'node', label: 'Node.js')],
+            actions: {'node': _ImmediateAction()},
+          );
+        },
+        rescanEnvironment: () async {},
+      );
+
+      await controller.start();
+
+      expect(controller.state.phase, SetupUiPhase.failed);
+      expect(independentRuns, 1);
+
+      await controller.startSelected(const {'node'});
+
+      expect(selectedIds, {'node'});
+      expect(controller.state.phase, SetupUiPhase.completed);
+    },
+  );
+
+  test(
     'shows a bounded MySQL initialization error without hiding its cause',
     () async {
       final controller = SetupUiController(

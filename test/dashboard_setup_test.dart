@@ -38,7 +38,8 @@ void main() {
         schemaVersion: 1,
         components: [_managedComponent('flutter', '3.44.6')],
       ),
-      readActiveVersions: () async => {'flutter': '3.41.0'},
+      readActiveVersions: () async => const {},
+      readDetectedVersions: () async => {'flutter': '3.41.4'},
       target: const RuntimeTarget(
         platform: RuntimePlatform.macos,
         architecture: RuntimeArchitecture.arm64,
@@ -64,6 +65,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('组件更新'), findsOneWidget);
     expect(find.text('Flutter SDK'), findsOneWidget);
+    expect(find.text('3.41.4  →  3.44.6'), findsOneWidget);
     expect(find.text('更新全部'), findsOneWidget);
     expect(find.text('下载更新包'), findsOneWidget);
 

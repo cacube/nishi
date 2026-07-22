@@ -120,6 +120,10 @@ final class SetupComposition {
     final updates = UpdateController(
       manifestSource: manifestSource,
       readActiveVersions: layout.readActiveVersions,
+      readDetectedVersions: () async {
+        await environment.scan();
+        return detectedRuntimeVersions(environment.components);
+      },
       artifactDownloader: RuntimeUpdateDownloader(
         layout: layout,
         downloads: downloads,

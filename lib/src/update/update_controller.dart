@@ -11,6 +11,7 @@ import 'update_downloader.dart';
 
 typedef UpdateManifestSource = Future<RuntimeManifest> Function();
 typedef ActiveVersionsReader = Future<Map<String, String>> Function();
+typedef DetectedVersionsReader = Future<Map<String, String>> Function();
 typedef ActiveVersionValidator =
     Future<bool> Function(RuntimeComponent component, String version);
 
@@ -18,6 +19,7 @@ final class UpdateController extends ChangeNotifier {
   UpdateController({
     required UpdateManifestSource manifestSource,
     required ActiveVersionsReader readActiveVersions,
+    DetectedVersionsReader? readDetectedVersions,
     ActiveVersionValidator? validateActiveVersion,
     UpdateArtifactDownloader? artifactDownloader,
     RuntimeOperationCoordinator? operations,
@@ -25,6 +27,7 @@ final class UpdateController extends ChangeNotifier {
     DateTime Function()? clock,
   }) : _manifestSource = manifestSource,
        _readActiveVersions = readActiveVersions,
+       _readDetectedVersions = readDetectedVersions ?? _emptyVersions,
        _validateActiveVersion = validateActiveVersion,
        _artifactDownloader = artifactDownloader,
        _operations = operations,
@@ -33,6 +36,7 @@ final class UpdateController extends ChangeNotifier {
 
   final UpdateManifestSource _manifestSource;
   final ActiveVersionsReader _readActiveVersions;
+  final DetectedVersionsReader _readDetectedVersions;
   final ActiveVersionValidator? _validateActiveVersion;
   final UpdateArtifactDownloader? _artifactDownloader;
   final RuntimeOperationCoordinator? _operations;
@@ -49,6 +53,7 @@ final class UpdateController extends ChangeNotifier {
     try {
       final manifest = await _manifestSource();
       final activeVersions = await _readActiveVersions();
+      final detectedVersions = await _readDetectedVersions();
       final plan = ProvisioningPlan.fromManifest(manifest, _target);
       final entries = <RuntimeUpdateEntry>[];
       for (final planEntry in plan.entries) {
@@ -61,6 +66,7 @@ final class UpdateController extends ChangeNotifier {
             !await validator(component, currentVersion)) {
           currentVersion = null;
         }
+        currentVersion ??= detectedVersions[component.id];
         final status = _statusFor(currentVersion, component.version);
         entries.add(
           RuntimeUpdateEntry(
@@ -176,3 +182,5 @@ final class UpdateController extends ChangeNotifier {
     return RuntimeUpdateStatus.updateAvailable;
   }
 }
+
+Future<Map<String, String>> _emptyVersions() async => const {};

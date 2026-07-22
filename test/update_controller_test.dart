@@ -55,6 +55,30 @@ void main() {
     },
   );
 
+  test('uses detected host versions when lc has no managed receipt', () async {
+    final controller = UpdateController(
+      manifestSource: () async => RuntimeManifest(
+        schemaVersion: 1,
+        components: [
+          _component('flutter', '3.44.6'),
+          _component('mysql', '8.4.10'),
+        ],
+      ),
+      readActiveVersions: () async => const {},
+      readDetectedVersions: () async => {'flutter': '3.41.4', 'mysql': '9.3.0'},
+      target: target,
+    );
+
+    await controller.check();
+
+    final flutter = controller.state.entryById('flutter')!;
+    expect(flutter.currentVersion, '3.41.4');
+    expect(flutter.status, RuntimeUpdateStatus.updateAvailable);
+    final mysql = controller.state.entryById('mysql')!;
+    expect(mysql.currentVersion, '9.3.0');
+    expect(mysql.status, RuntimeUpdateStatus.newerThanTarget);
+  });
+
   test('does not offer a signed target as an implicit downgrade', () async {
     final controller = UpdateController(
       manifestSource: () async => RuntimeManifest(

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dev_environment_manager/src/environment/environment_component.dart';
 import 'package:dev_environment_manager/src/environment/environment_controller.dart';
 import 'package:dev_environment_manager/src/environment/environment_scanner.dart';
@@ -35,6 +37,25 @@ void main() {
     expect(controller.ready, isFalse);
     expect(controller.requiredActionCount, 1);
   });
+
+  test('concurrent scans wait for the same host scan', () async {
+    final scanner = _DelayedScanner();
+    final controller = EnvironmentController(scanner: scanner);
+
+    final first = controller.scan();
+    final second = controller.scan();
+
+    expect(scanner.calls, 1);
+    expect(controller.components, isEmpty);
+
+    scanner.complete([
+      _component('flutter', required: true, status: ComponentStatus.ready),
+    ]);
+    await Future.wait([first, second]);
+
+    expect(controller.components.single.id, 'flutter');
+    expect(controller.scanning, isFalse);
+  });
 }
 
 EnvironmentComponent _component(
@@ -59,4 +80,19 @@ class _FakeScanner extends EnvironmentScanner {
 
   @override
   Future<List<EnvironmentComponent>> scan() async => result;
+}
+
+class _DelayedScanner extends EnvironmentScanner {
+  final _result = Completer<List<EnvironmentComponent>>();
+  int calls = 0;
+
+  void complete(List<EnvironmentComponent> components) {
+    _result.complete(components);
+  }
+
+  @override
+  Future<List<EnvironmentComponent>> scan() {
+    calls++;
+    return _result.future;
+  }
 }

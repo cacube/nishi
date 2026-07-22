@@ -9,6 +9,7 @@ import '../compatibility/service_probe.dart';
 import '../compatibility/software_version.dart';
 import '../compatibility/version_output_parser.dart';
 import '../storage/runtime_layout.dart';
+import 'android_sdk_version.dart';
 import 'environment_component.dart';
 
 class EnvironmentScanner {
@@ -37,7 +38,13 @@ class EnvironmentScanner {
         ComponentGroup.flutter,
         Icons.android,
       ),
-      _component('browser', 'Web 浏览器', ComponentGroup.flutter, Icons.language),
+      _component(
+        'browser',
+        'Web 调试浏览器',
+        ComponentGroup.flutter,
+        Icons.language,
+        required: false,
+      ),
       if (Platform.isMacOS)
         _component(
           'xcode',
@@ -206,16 +213,58 @@ class EnvironmentScanner {
   }
 
   Future<EnvironmentComponent> _android(EnvironmentComponent component) async {
-    final sdkRoot =
-        Platform.environment['ANDROID_SDK_ROOT'] ??
-        Platform.environment['ANDROID_HOME'];
+    final environment = commandEnvironment();
+    final home = environment['HOME'] ?? environment['USERPROFILE'] ?? '';
+    final localAppData = environment['LOCALAPPDATA'];
+    final candidates = <String>{
+      ?environment['ANDROID_SDK_ROOT'],
+      ?environment['ANDROID_HOME'],
+      if (home.isNotEmpty)
+        '$home${Platform.pathSeparator}sdk${Platform.pathSeparator}android',
+      if (Platform.isMacOS && home.isNotEmpty) '$home/Library/Android/sdk',
+      if (Platform.isWindows && localAppData != null)
+        '$localAppData\\Android\\Sdk',
+    };
     final adb = await _command(component, 'adb', ['version']);
-    if (adb.status == ComponentStatus.ready) return adb;
-    if (sdkRoot != null && Directory(sdkRoot).existsSync()) {
+    String? platformVersion;
+    var sdkFound = false;
+    for (final sdkRoot in candidates) {
+      final directory = Directory(sdkRoot);
+      if (!directory.existsSync()) continue;
+      sdkFound = true;
+      final platforms = Directory('$sdkRoot${Platform.pathSeparator}platforms');
+      if (!platforms.existsSync()) continue;
+      final candidate = latestAndroidSdkPlatformVersion(
+        platforms
+            .listSync(followLinks: false)
+            .whereType<Directory>()
+            .map(
+              (entry) =>
+                  entry.uri.pathSegments.where((part) => part.isNotEmpty).last,
+            ),
+      );
+      if (candidate != null &&
+          (platformVersion == null ||
+              SoftwareVersion.parse(candidate) >
+                  SoftwareVersion.parse(platformVersion))) {
+        platformVersion = candidate;
+      }
+    }
+    if (platformVersion != null) {
       return component.copyWith(
+        status: adb.status == ComponentStatus.ready
+            ? ComponentStatus.ready
+            : ComponentStatus.attention,
+        version: platformVersion,
+        detail: adb.status == ComponentStatus.ready
+            ? null
+            : 'SDK 已找到，platform-tools 不可用',
+      );
+    }
+    if (adb.status == ComponentStatus.ready || sdkFound) {
+      return adb.copyWith(
         status: ComponentStatus.attention,
-        version: sdkRoot,
-        detail: 'SDK 已找到，platform-tools 不可用',
+        detail: 'SDK 已找到，但未检测到 Android 平台',
       );
     }
     return _missing(component);

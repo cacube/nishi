@@ -9,6 +9,7 @@ class EnvironmentController extends ChangeNotifier {
   }) : _scanner = scanner;
 
   final EnvironmentScanner _scanner;
+  Future<void>? _scanInFlight;
   List<EnvironmentComponent> components = const [];
   bool scanning = false;
   Object? scanError;
@@ -30,8 +31,15 @@ class EnvironmentController extends ChangeNotifier {
       )
       .length;
 
-  Future<void> scan() async {
-    if (scanning) return;
+  Future<void> scan() {
+    final inFlight = _scanInFlight;
+    if (inFlight != null) return inFlight;
+    final scan = _performScan();
+    _scanInFlight = scan;
+    return scan;
+  }
+
+  Future<void> _performScan() async {
     scanning = true;
     scanError = null;
     notifyListeners();
@@ -41,6 +49,7 @@ class EnvironmentController extends ChangeNotifier {
       scanError = error;
     } finally {
       scanning = false;
+      _scanInFlight = null;
       notifyListeners();
     }
   }
